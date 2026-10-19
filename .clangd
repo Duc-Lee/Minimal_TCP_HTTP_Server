@@ -1,0 +1,49 @@
+CompileFlags:
+  # Dùng compile_commands.json (auto-detected từ project root)
+  # Fallback flags khi file không có entry trong compile_commands.json
+  Add:
+    - --target=riscv64-linux-gnu
+    - -march=rv64gc
+    - -mabi=lp64d
+    - -mcmodel=medany
+    - -ffreestanding
+    - -fno-common
+    - -nostdlib
+    - -std=gnu99
+    - -I.
+    - -Wall
+    - -Wno-unknown-attributes
+  Remove:
+    # clangd không hỗ trợ -Werror khi phân tích IDE (sẽ chặn mọi warning thành error)
+    - -Werror
+    - -ffile-prefix-map=*
+    - -MD
+
+Diagnostics:
+  UnusedIncludes: None
+  # Bỏ qua các warning thừa khi phân tích IDE
+  Suppress:
+    - unused-includes
+    - unused-variable
+    - unused-function
+    - unused-but-set-variable
+
+Index:
+  Background: Build
+
+---
+# Kernel files: dùng RISC-V baremetal target
+If:
+  PathMatch: kernel/.*\.c
+CompileFlags:
+  Add:
+    - --target=riscv64-linux-gnu
+
+---
+# User-space files
+If:
+  PathMatch: user/.*\.c
+CompileFlags:
+  Add:
+    - --target=riscv64-linux-gnu
+    - -Iuser

@@ -1,0 +1,29 @@
+# Build artifacts
+*~
+_*
+*.o
+*.d
+*.asm
+*.sym
+*.img
+*.gch
+/mkfs/mkfs
+/kernel/kernel
+/user/usys.S
+/user/initcode
+/user/initcode.out
+.gdbinit
+TAGS
+test-xv6.out
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+compile_commands.json
+.cache/
+.clangd/
+
+# Leftover folders
+xv6-riscv/

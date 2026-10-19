@@ -1,0 +1,151 @@
+# Báo Cáo Triển Khai Chi Tiết Giai Đoạn 1: TCP/IP Stack & HTTP Server
+
+Tài liệu này mô tả chi tiết toàn bộ kiến trúc, các thành phần đã hiện thực, các vấn đề kỹ thuật và giải pháp xử lý trong **Giai đoạn 1 (Cấp độ 1 – Cốt lõi)** của dự án Minimal TCP & HTTP Server trên hệ điều hành **xv6-riscv** (64-bit).
+
+---
+
+## 1. Mục tiêu Giai đoạn 1
+
+- Tự viết network stack hoàn chỉnh chạy trong kernel xv6:
+  - Tầng Liên kết & Driver (L2): Intel 82540EM (E1000) DMA Ring + bộ lọc giả lập rớt gói 10%.
+  - Tầng Mạng (L2/L3): Ethernet II, ARP resolution & cache động, IPv4 input/output, RFC 1071 Checksum.
+  - Tầng Giao vận (L4): TCP FSM 11 trạng thái chuẩn RFC 793, Sliding Window flow control, RTO Retransmission Timer (Jacobson/Karels, RFC 6298), Fast Retransmit (RFC 5681).
+  - Tầng Ứng dụng & Socket: BSD Socket syscalls (`socket`, `bind`, `listen`, `accept`, `connect`), VFS integration (`FD_SOCK`).
+  - Web Server `httpd` (HTTP/1.0): Phục vụ tệp tĩnh và phục vụ thành công tệp nhị phân 1 MB về máy Linux Host qua kết nối mạng có tỉ lệ rớt gói 10%, mã băm SHA-256 khớp 100%.
+
+---
+
+## 2. Cấu trúc Source Code & Phân nhiệm File
+
+```
+kernel/
+├── e1000.c, e1000_dev.h   # Driver NIC Intel 82540EM: DMA Ring TX/RX & bộ lọc rớt gói 10%
+├── eth.c                  # Đóng gói/giải mã Ethernet frame (L2)
+├── arp.c                  # Phân giải địa chỉ ARP: ARP Request broadcast, Reply & ARP Cache
+├── ip.c                   # Định tuyến và xử lý gói tin IPv4 (L3)
+├── checksum.c             # Thuật toán Internet Checksum bù 1 chuẩn RFC 1071 (IP/TCP)
+├── tcp.c                  # Quản lý struct tcp_pcb, bảng băm kết nối 4-tuple, timer process
+├── tcp_input.c            # Xử lý segment TCP đến: FSM 11 trạng thái, ACK, Fast Retransmit
+├── tcp_output.c           # Đóng gói TCP header, điều khiển Send Window, hàng đợi retransmit_q
+├── tcp_timer.c            # Thuật toán tính RTO động Jacobson/Karels & định thời timer interrupt
+├── ringbuf.c              # Bộ đệm vòng tròn FIFO an toàn đa luồng cho Socket
+├── sock.c, sysnet.c       # BSD Socket layer, tích hợp struct file (FD_SOCK), network syscalls
+└── net.h                  # Header định nghĩa toàn bộ struct, macro và protocol constants
+user/
+├── httpd.c                # Web Server HTTP/1.0: phục vụ file tĩnh và route /file1mb
+└── user.h                 # Syscall prototypes và socket constants ở user-space
+```
+
+---
+
+## 3. Chi tiết triển khai theo từng tầng
+
+### 3.1. Tầng Driver L2 (Intel E1000 NIC) & Packet Loss Simulator
+- **DMA Ring Buffer**: Cấu hình 16 TX descriptors và 16 RX descriptors theo chuẩn Intel 82540EM:
+  - Khởi tạo thanh ghi `TDBAL/TDBAH`, `TDLEN`, `TDH/TDT` cho TX Ring; `RDBAL/RDBAH`, `RDLEN`, `RDH/RDT` cho RX Ring.
+  - Cấp phát trước 16 `mbuf` gắn vào mảng RX descriptor.
+- **Xử lý ngắt & Polling**: Bật ngắt `RXT0` (Receive Timer Interrupt) và bit `SLU` (Set Link Up). Trong hàm ngắt `e1000_intr()`, đọc thanh ghi `ICR` để xóa ngắt, sau đó gọi `e1000_recv()` quét sạch các descriptor có bit `DD` (Descriptor Done), đẩy gói lên `net_rx()` rồi cấp phát ngay `mbuf` mới bù lại vị trí đó trong RX Ring.
+- **Bộ lọc rớt gói 10% (Packet Loss Simulator)**:
+  - Sử dụng thuật toán tạo số giả ngẫu nhiên LCG trong kernel:  
+    `seed = (seed * 1103515245 + 12345) & 0x7fffffff; return (seed % 100) < 10;`
+  - Đặt tại hàm `e1000_transmit()`: Bỏ qua gói ARP (không drop ARP để duy trì kết nối L2), ngẫu nhiên giải phóng và không truyền 10% các gói IP/TCP. Điều này buộc TCP Layer phải kích hoạt cơ chế timeout và retransmission.
+
+### 3.2. Tầng Mạng (Ethernet, ARP & IPv4)
+- **Ethernet (Layer 2)**:
+  - `eth_input()`: Kiểm tra kích thước khung tin $\ge 14$ byte, bóc tách `eth_type`. Gói `ETH_TYPE_IP (0x0800)` chuyển lên `ip_input()`; gói `ETH_TYPE_ARP (0x0806)` chuyển lên `arp_input()`.
+  - `eth_output()`: Đóng Ethernet Header với Source MAC (`local_mac = 52:54:00:12:34:56`) và Destination MAC được phân giải từ ARP.
+- **ARP Resolution & Cache**:
+  - `arp_cache`: Bảng ánh xạ động (IP $\leftrightarrow$ MAC, TTL, trạng thái VALID/RESOLVING).
+  - Khi nhận `ARP_OP_REQUEST` hỏi IP xv6 (`10.0.2.15`): Tự động đảo ngược địa chỉ, điền MAC của xv6 và gửi trả gói `ARP_OP_REPLY`.
+  - Khi gửi gói tin tới IP chưa có trong cache: Phát broadcast ARP Request (`ff:ff:ff:ff:ff:ff`) và lưu tạm gói tin vào `entry->pending_m`.
+- **IPv4 (Layer 3)**:
+  - `ip_input()`: Kiểm tra phiên bản IPv4 (version 4), chiều dài IHL $\ge 20$, Total Length và xác thực checksum Internet. Nếu `ip_dst == local_ip` hoặc broadcast, chuyển gói tin lên protocol tương ứng (`IP_PROTO_TCP = 6`).
+  - `ip_output()`: Điền IPv4 header, TTL = 64, tính checksum bù 1, phân giải MAC đích qua `arp_resolve()` và đẩy xuống `eth_output()`.
+- **RFC 1071 Internet Checksum**:
+  - `checksum.c`: Triển khai chuẩn hóa gom 16-bit big-endian word, cộng dồn vào biến `uint32`, gập các bit tràn (`sum = (sum >> 16) + (sum & 0xffff)`) và lấy bù 1 (`htons(~sum)`). Đảm bảo hàm verify trả về `0x0000` chính xác cho cả IP và TCP Pseudo Header.
+
+### 3.3. Tầng Giao vận (TCP FSM, Sliding Window & RTO)
+- **Máy trạng thái 11 trạng thái TCP (RFC 793)**:
+  - `CLOSED` $\rightarrow$ `LISTEN` khi socket gọi `listen()`.
+  - Bắt tay 3 bước:
+    - Nhận `SYN` tại `TCP_LISTEN` $\rightarrow$ clone PCB mới sang `TCP_SYN_RCVD`, gửi `SYN-ACK`.
+    - Nhận `ACK` tại `TCP_SYN_RCVD` $\rightarrow$ chuyển sang `TCP_ESTABLISHED`, thêm vào `backlog_q` của socket cha.
+    - Xử lý retransmission: Nếu client truyền lại `SYN` khi server đang ở `TCP_SYN_RCVD`, truyền lại ngay `SYN-ACK`.
+  - Đóng kết nối 4 bước:
+    - Khi nhận `FIN` tại `TCP_ESTABLISHED` $\rightarrow$ chuyển sang `TCP_CLOSE_WAIT`, gửi `ACK` và báo EOF cho socket reader.
+    - Socket đóng $\rightarrow$ gửi `FIN`, chuyển sang `TCP_LAST_ACK`. Nhận `ACK` cuối $\rightarrow$ chuyển sang `TCP_CLOSED` và thu hồi PCB.
+- **Sliding Window & Flow Control**:
+  - Mỗi PCB lưu: `snd_una`, `snd_nxt`, `snd_wnd`, `rcv_nxt`, `rcv_wnd`.
+  - Dữ liệu nhận được kiểm tra đúng thứ tự (`seq == pcb->rcv_nxt`). Nếu đúng, tăng `rcv_nxt` tương ứng payload length và gửi `ACK`.
+  - Giới hạn dòng chảy khi gửi dữ liệu trong `sock_write()`: Giới hạn lượng segment chưa được ACK (`in_flight = pcb->snd_nxt - pcb->snd_una`) không vượt quá 16 segments (~22 KB). Nếu vượt ngưỡng, process gọi `sleep_prepare(pcb)` để nhường CPU cho đến khi nhận được ACK.
+- **Retransmission Queue (`retransmit_q`)**:
+  - Tất cả các gói chứa payload hoặc có cờ `SYN`/`FIN` khi gửi qua `tcp_output()` đều được tạo bản sao (clone) đưa vào hàng đợi `retransmit_q`.
+  - Khi nhận ACK mới (`ack > snd_una`), duyệt và giải phóng các segment đã nằm trong dải ACK.
+- **RTO Timer Jacobson/Karels (RFC 6298)**:
+  - Đo RTT, tính Smoothed RTT ($SRTT$) và độ biến thiên ($RTTVAR$):
+    $$SRTT = \frac{7}{8} SRTT + \frac{1}{8} RTT$$
+    $$RTTVAR = \frac{3}{4} RTTVAR + \frac{1}{4} |SRTT - RTT|$$
+    $$RTO = SRTT + 4 \times RTTVAR$$
+  - Base RTO được khởi tạo là 200 ms (phù hợp mạng nội bộ / giả lập).
+  - Khi xảy ra timeout: Nhân đôi RTO (Exponential Backoff), cap trần ở 2000 ms, đặt deadline mới và truyền lại gói đầu tiên của `retransmit_q`.
+  - Khi nhận ACK mới tiến triển: Reset `backoff = 0` và phục hồi RTO về baseline 200 ms.
+- **Fast Retransmit (RFC 5681)**:
+  - Khi client phát hiện mất gói ở giữa luồng dữ liệu, client liên tục gửi lại các Duplicate ACK có `ack == snd_una`.
+  - Trong `tcp_handle_ack()`, duy trì bộ đếm `pcb->dup_acks`. Khi nhận đủ 3 Duplicate ACKs (`dup_acks == 3`), kích hoạt Fast Retransmit: clone gói đầu `retransmit_q` gửi ngay lập tức mà không phải chờ hết hạn timer RTO.
+
+### 3.4. Tầng Ứng dụng, Socket API & Web Server
+- **Socket Abstraction (`struct socket`)**:
+  - Gồm 2 buffer vòng `rx_buf` và `tx_buf` (mỗi buffer 4096 byte) bảo vệ bằng `spinlock`.
+  - Tích hợp VFS: `struct file` có kiểu `FD_SOCK` trỏ tới `struct socket`. Các hàm file subsystem gọi `sock_read()` và `sock_write()`.
+- **System Calls**:
+  - `sys_socket()`: Cấp phát socket mới từ bảng `sock_table`.
+  - `sys_bind()`: Gán địa chỉ IP và port cục bộ.
+  - `sys_listen()`: Đưa PCB vào danh sách `listen_list` và cấu hình backlog.
+  - `sys_accept()`: Chờ trên socket listen đến khi có kết nối mới trong `backlog_q`, cấp phát file descriptor và trả về cho tiến trình người dùng.
+- **HTTP/1.0 Web Server (`user/httpd.c`)**:
+  - Tạo socket, bind port 80 (`INADDR_ANY`), listen với backlog = 5.
+  - Vòng lặp `accept()`: Đọc HTTP request (`GET /uri HTTP/1.x`).
+  - Phục vụ tệp tĩnh: Mở file trên hệ thống tệp xv6 (`sysfile`), đọc và ghi qua socket.
+  - Phục vụ file nhị phân 1 MB: Route `/file1mb` sinh đúng 1,048,576 byte theo pattern `(i * 37 + 13) & 0xff` lặp 1024 chunks 1024-byte, ghi trực tiếp ra socket.
+
+---
+
+## 4. Các lỗi phát sinh trong quá trình phát triển & Cách xử lý
+
+| STT | Triệu chứng lỗi | Nguyên nhân gốc | Giải pháp kỹ thuật |
+|---|---|---|---|
+| 1 | Checksum TCP tính ra sai, host drop toàn bộ gói | Dồn word 16-bit theo endianness của host RISC-V không đảo byte trước khi bù | Sửa lại `in_cksum()` đọc từng cặp byte big-endian và trả về `htons(~sum)`. Checksum verify ra `0x0000`. |
+| 2 | `sock_read()` bị treo vĩnh viễn khi client gửi request HTTP | `sock_read()` lặp `while (total_read < n)` chờ đủ 1024 byte, trong khi HTTP GET chỉ có ~80 byte | Cho phép `sock_read()` trả về ngay khi đọc được chunk đầu tiên nếu không còn byte sẵn có trong ringbuf. |
+| 3 | Server từ chối ghi response khi client gửi FIN | Client đóng chiều ghi gửi FIN, PCB chuyển sang `TCP_CLOSE_WAIT`. `sock_write()` chỉ cho phép `TCP_ESTABLISHED` | Cho phép `sock_write()` ghi dữ liệu ở cả hai trạng thái `TCP_ESTABLISHED` và `TCP_CLOSE_WAIT`. |
+| 4 | Cạn kiệt mbuf (`mbufalloc failed`) khi tải file lớn | Không có flow control, `sock_write()` gửi ồ ạt hàng trăm gói tin trong khi client chưa kịp ACK | Bổ sung Flow Control giới hạn in-flight $\le 16$ segments; nếu vượt quá thì `sleep(pcb)` chờ ACK giải phóng. Tăng pool mbuf lên 128. |
+| 5 | Treo / chết kết nối khi rớt gói liên tục trên đa nhân SMP | `tcp_timer_process()` duyệt và sửa `retransmit_q` mà không giữ `pcb->lock`, xung đột với core nhận ACK | Đồng bộ hóa per-PCB bằng `acquire(&pcb->lock)` trong `tcp_timer_process()` trước khi thao tác trên `retransmit_q`. |
+| 6 | Timeout 30s khi curl file 1 MB qua mạng rớt 10% | RTO ban đầu đặt 1000 ms, sau 4 lần drop liên tiếp nhảy lên 16000 ms; thiếu Fast Retransmit | Giảm base RTO xuống 200 ms, trần RTO 2000 ms, tự động reset RTO khi có new ACK; triển khai Fast Retransmit (3 Dup-ACKs). |
+
+---
+
+## 5. Kết quả nghiệm thu thực tế
+
+### 5.1. Bắt tay 3 bước & Phục vụ file tĩnh
+```bash
+curl -v http://127.0.0.1:20080/README
+# Kết quả: Tải toàn bộ nội dung file README, HTTP 200 OK, kết thúc kết nối bình thường.
+```
+
+### 5.2. Tải tệp 1 MB với 10% Packet Loss & Kiểm tra SHA-256
+```bash
+# 1. Chạy tải qua curl từ Linux Host:
+curl --max-time 60 http://127.0.0.1:20080/file1mb -o downloaded_1mb.bin
+
+# 2. Sinh tệp đối chiếu chuẩn:
+python3 -c 'open("expected_1mb.bin", "wb").write(bytes(((i * 37 + 13) & 0xff) for i in range(1048576)))'
+
+# 3. So sánh mã băm:
+sha256sum downloaded_1mb.bin expected_1mb.bin
+```
+
+**Kết quả:**
+```
+c4e1ab33a4d2f0d7be4e6be6c387096da51a28bad003f71309bb774f75139111  downloaded_1mb.bin
+c4e1ab33a4d2f0d7be4e6be6c387096da51a28bad003f71309bb774f75139111  expected_1mb.bin
+```
+$\rightarrow$ **Trùng khớp tuyệt đối 100%**, tải thành công trọn vẹn 1,048,576 byte dưới môi trường mạng rớt gói 10%.

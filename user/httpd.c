@@ -1,0 +1,142 @@
+// ============================================================================
+// Thành viên 3 (TV3): Tầng Socket VFS, Web Server httpd & Test/Demo
+// File: user/httpd.c
+// Giai đoạn 1: Web Server httpd (HTTP/1.0 tải file tĩnh 1 MB)
+// ============================================================================
+
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "kernel/fcntl.h"
+#include "user/user.h"
+
+#define HTTP_PORT 80
+#define BUF_SIZE  1024
+
+// Xử lý một request HTTP/1.0 từ client
+void
+handle_http_client(int client_fd)
+{
+  char req[BUF_SIZE];
+  int n = read(client_fd, req, sizeof(req) - 1);
+  if (n <= 0) {
+    close(client_fd);
+    return;
+  }
+  req[n] = '\0';
+
+  // 1. Kiểm tra phương thức GET
+  if (req[0] != 'G' || req[1] != 'E' || req[2] != 'T' || req[3] != ' ') {
+    const char *bad = "HTTP/1.0 400 Bad Request\r\n\r\n";
+    write(client_fd, bad, strlen(bad));
+    close(client_fd);
+    return;
+  }
+
+  // 2. Phân tích đường dẫn tệp
+  char path[128];
+  int i = 4, j = 0;
+  if (req[i] == '/')
+    i++;
+
+  while (req[i] != ' ' && req[i] != '\r' && req[i] != '\n' && req[i] != '\0' && j < sizeof(path) - 1) {
+    path[j++] = req[i++];
+  }
+  path[j] = '\0';
+
+  if (j == 0) {
+    strcpy(path, "README");
+  }
+
+  printf("httpd: target path='%s'\n", path);
+
+  // 3. Mở file từ hệ thống tệp
+  int file_fd = open(path, O_RDONLY);
+  if (file_fd < 0) {
+    if (strcmp(path, "file1mb") == 0 || strcmp(path, "1mb.bin") == 0) {
+      // Phục vụ dữ liệu 1 MB (1024 * 1024 bytes) chuẩn pattern
+      const char *hdr = "HTTP/1.0 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: 1048576\r\n\r\n";
+      write(client_fd, hdr, strlen(hdr));
+
+      char gen_buf[BUF_SIZE];
+      for (int b = 0; b < BUF_SIZE; b++) {
+        gen_buf[b] = (char)((b * 37 + 13) & 0xff);
+      }
+      for (int k = 0; k < 1024; k++) {
+        int sent = 0;
+        while (sent < BUF_SIZE) {
+          int w = write(client_fd, gen_buf + sent, BUF_SIZE - sent);
+          if (w <= 0)
+            break;
+          sent += w;
+        }
+        if (sent < BUF_SIZE)
+          break;
+      }
+      close(client_fd);
+      return;
+    }
+    const char *not_found = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\n404 Not Found";
+    write(client_fd, not_found, strlen(not_found));
+    close(client_fd);
+    return;
+  }
+
+  // 4. Gửi HTTP header 200 OK
+  const char *hdr = "HTTP/1.0 200 OK\r\nContent-Type: application/octet-stream\r\n\r\n";
+  write(client_fd, hdr, strlen(hdr));
+
+  // 5. Đọc và truyền dữ liệu theo từng khối (hỗ trợ file tĩnh)
+  char file_buf[BUF_SIZE];
+  int bytes_read;
+  while ((bytes_read = read(file_fd, file_buf, sizeof(file_buf))) > 0) {
+    int bytes_sent = 0;
+    while (bytes_sent < bytes_read) {
+      int w = write(client_fd, file_buf + bytes_sent, bytes_read - bytes_sent);
+      if (w <= 0)
+        break;
+      bytes_sent += w;
+    }
+    if (bytes_sent < bytes_read)
+      break;
+  }
+
+  close(file_fd);
+  close(client_fd);
+}
+
+int
+main(int argc, char *argv[])
+{
+  int port = HTTP_PORT;
+  if (argc > 1)
+    port = atoi(argv[1]);
+
+  printf("Starting xv6 httpd server (HTTP/1.0) on port %d...\n", port);
+
+  int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (listen_fd < 0) {
+    printf("httpd: socket() failed\n");
+    exit(1);
+  }
+
+  if (bind(listen_fd, INADDR_ANY, port) < 0) {
+    printf("httpd: bind() failed\n");
+    close(listen_fd);
+    exit(1);
+  }
+
+  if (listen(listen_fd, 5) < 0) {
+    printf("httpd: listen() failed\n");
+    close(listen_fd);
+    exit(1);
+  }
+
+  while (1) {
+    int client_fd = accept(listen_fd);
+    if (client_fd < 0)
+      continue;
+    handle_http_client(client_fd);
+  }
+
+  exit(0);
+}
