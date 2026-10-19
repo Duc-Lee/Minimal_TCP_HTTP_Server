@@ -1,8 +1,4 @@
-// ============================================================================
-// Thành viên 1 (TV1): Hạ tầng Mạng, Driver L2/L3 & Zero-Copy
-// File: kernel/mbuf.c
-// Nhiệm vụ: Quản lý bộ đệm struct mbuf (có biến đếm ref_cnt)
-// ============================================================================
+// quan ly bo dem goi tin mbuf giong kieu sk_buff / bsd mbuf
 
 #include "types.h"
 #include "riscv.h"
@@ -31,7 +27,7 @@ mbufinit(void)
   release(&mbuf_pool.lock);
 }
 
-// Cấp phát mbuf mới với khoảng trống headroom
+// lay mbuf tu pool, chot san headroom de prepended header
 struct mbuf*
 mbufalloc(unsigned int headroom)
 {
@@ -54,7 +50,7 @@ mbufalloc(unsigned int headroom)
   return m;
 }
 
-// Giải phóng mbuf hoặc giảm ref_cnt
+// giai phong mbuf hoac giam ref count
 void
 mbuffree(struct mbuf *m)
 {
@@ -71,19 +67,19 @@ mbuffree(struct mbuf *m)
   release(&mbuf_pool.lock);
 }
 
-// Mở rộng phần đầu (header) mbuf về phía trước
+// day nguoc con tro head ve truoc de nhet header moi
 char*
 mbufpush(struct mbuf *m, unsigned int len)
 {
   if (m->head - len < m->buf)
-    return 0; // Tràn bộ đệm headroom
+    return 0; // khong du headroom
 
   m->head -= len;
   m->len += len;
   return m->head;
 }
 
-// Cắt bớt phần đầu (header) mbuf về phía sau
+// cat bot header o dau va dich head ra sau
 char*
 mbufpull(struct mbuf *m, unsigned int len)
 {
@@ -96,7 +92,7 @@ mbufpull(struct mbuf *m, unsigned int len)
   return temp;
 }
 
-// Mở rộng dữ liệu về phía đuôi mbuf
+// noi them du lieu vao duoi
 char*
 mbufput(struct mbuf *m, unsigned int len)
 {
@@ -108,7 +104,7 @@ mbufput(struct mbuf *m, unsigned int len)
   return temp;
 }
 
-// Cắt ngắn đuôi mbuf
+// cat bot du lieu o duoi
 void
 mbuftrim(struct mbuf *m, unsigned int len)
 {

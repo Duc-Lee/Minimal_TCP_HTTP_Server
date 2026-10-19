@@ -1,9 +1,4 @@
-// ============================================================================
-// Thành viên 1 (TV1): Hạ tầng Mạng, Driver L2/L3 & Zero-Copy
-// File: kernel/eth.c
-// Nhiệm vụ: Xử lý tầng liên kết dữ liệu Ethernet (L2)
-// ============================================================================
-
+// xu ly ethernet frame l2
 #include "types.h"
 #include "riscv.h"
 #include "defs.h"
@@ -21,7 +16,7 @@ eth_init(uint8 *mac)
   }
 }
 
-// Xử lý gói tin nhận từ driver E1000 lên
+// nhan frame tu e1000 len
 void
 eth_input(struct mbuf *m)
 {
@@ -35,7 +30,7 @@ eth_input(struct mbuf *m)
   ethhdr = (struct eth *)m->head;
   uint16 type = ntohs(ethhdr->type);
 
-  // Bỏ Ethernet header để chuyển lên L3
+  // bo ethernet header roi day len l3
   mbufpull(m, sizeof(struct eth));
 
   if (type == ETH_TYPE_IP) {
@@ -43,12 +38,12 @@ eth_input(struct mbuf *m)
   } else if (type == ETH_TYPE_ARP) {
     arp_input(m);
   } else {
-    // Giao thức L2 không hỗ trợ
+    // khong ho tro loai goi nay
     mbuffree(m);
   }
 }
 
-// Đóng gói Ethernet frame và gửi xuống driver E1000
+// dong goi ethernet frame va day xuong e1000
 int
 eth_output(struct mbuf *m, uint8 *dst_mac, uint16 eth_type)
 {

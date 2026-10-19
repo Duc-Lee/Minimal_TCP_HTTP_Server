@@ -1,5 +1,1 @@
-// ============================================================================
-// File: user/netstat.c
-// Giai đoạn 2 & 3: Hiển thị trạng thái các kết nối mạng
-// Hiện tại để trống cho Giai đoạn 2 & 3
-// ============================================================================
+// cong cu netstat xem bang ket noi tcp va trang thai pcb

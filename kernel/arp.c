@@ -1,9 +1,4 @@
-// ============================================================================
-// Thành viên 1 (TV1): Hạ tầng Mạng, Driver L2/L3 & Zero-Copy
-// File: kernel/arp.c
-// Nhiệm vụ: Phân giải ARP (giữ gói chờ MAC), bảng ARP Cache
-// ============================================================================
-
+// phan giai arp va cache mac
 #include "types.h"
 #include "riscv.h"
 #include "defs.h"
@@ -17,7 +12,7 @@ struct arp_entry {
   uint32 ip;
   uint8  mac[ETH_ADDR_LEN];
   int    valid;
-  struct mbuf *pending_queue; // Hàng đợi giữ các gói tin chờ giải MAC
+  struct mbuf *pending_queue; // giu goi cho phan giai mac
 };
 
 static struct {
@@ -40,7 +35,7 @@ arp_init(void)
   release(&arp_cache.lock);
 }
 
-// ─── Gửi ARP Reply (phải giữ arp_cache.lock trước khi gọi) ─────────────────
+// gui arp reply ve cho host
 static void
 arp_send_reply(uint32 target_ip, uint8 *target_mac)
 {
@@ -62,16 +57,16 @@ arp_send_reply(uint32 target_ip, uint8 *target_mac)
 
   for (int i = 0; i < ETH_ADDR_LEN; i++) {
     arphdr->sha[i] = local_mac[i];    // sender = xv6
-    arphdr->tha[i] = target_mac[i];   // target = người hỏi
+    arphdr->tha[i] = target_mac[i];   // target mac cua client
   }
   arphdr->sip = htonl(local_ip);
   arphdr->tip = htonl(target_ip);
 
-  // Gửi ra ngoài qua eth_output (ARP không cần IP layer)
+  // gui ra eth_output, arp khong can ip header
   eth_output(m, target_mac, ETH_TYPE_ARP);
 }
 
-// ─── Gửi ARP Request broadcast (phải giữ arp_cache.lock trước khi gọi) ─────
+// broadcast arp request
 static void
 arp_send_request(uint32 target_ip)
 {
@@ -104,7 +99,7 @@ arp_send_request(uint32 target_ip)
   eth_output(m, broadcast_mac, ETH_TYPE_ARP);
 }
 
-// ─── arp_input: Xử lý gói tin ARP nhận được ─────────────────────────────────
+// xu ly goi arp den
 void
 arp_input(struct mbuf *m)
 {
@@ -130,16 +125,15 @@ arp_input(struct mbuf *m)
 
   acquire(&arp_cache.lock);
 
-  // Cập nhật hoặc thêm entry vào ARP Cache từ thông tin sender
+  // cap nhat hoac hoc entry moi tu sender
   int updated = 0;
   int free_slot = -1;
   for (int i = 0; i < ARP_TABLE_SIZE; i++) {
     if (arp_cache.entries[i].valid && arp_cache.entries[i].ip == sip) {
-      // Cập nhật MAC mới nhất
       for (int j = 0; j < ETH_ADDR_LEN; j++)
         arp_cache.entries[i].mac[j] = arphdr->sha[j];
 
-      // Gửi các gói tin đang chờ trong pending_queue
+      // day cac goi dang cho trong queue di tiep
       struct mbuf *p = arp_cache.entries[i].pending_queue;
       arp_cache.entries[i].pending_queue = 0;
       while (p) {
@@ -155,7 +149,7 @@ arp_input(struct mbuf *m)
       free_slot = i;
   }
 
-  // Học ARP sender mới vào cache
+  // them vao slot trong
   if (!updated && free_slot >= 0) {
     arp_cache.entries[free_slot].ip = sip;
     for (int j = 0; j < ETH_ADDR_LEN; j++)
@@ -164,14 +158,13 @@ arp_input(struct mbuf *m)
     arp_cache.entries[free_slot].pending_queue = 0;
   }
 
-  // Nếu là ARP Request gửi tới địa chỉ IP của ta: phản hồi ARP Reply
+  // neu hoi dung ip cua minh thi tra loi reply
   if (op == ARP_OP_REQUEST && ntohl(arphdr->tip) == local_ip) {
     uint8 requester_mac[ETH_ADDR_LEN];
     for (int i = 0; i < ETH_ADDR_LEN; i++)
       requester_mac[i] = arphdr->sha[i];
     release(&arp_cache.lock);
     mbuffree(m);
-    // Gửi ARP Reply trả MAC của xv6 cho người hỏi
     arp_send_reply(sip, requester_mac);
     return;
   }
@@ -180,7 +173,7 @@ arp_input(struct mbuf *m)
   mbuffree(m);
 }
 
-// ─── arp_resolve: Tìm MAC theo IP, nếu chưa có thì enqueue và broadcast ─────
+// tim mac theo ip, neu chua co thi luu vao queue va broadcast request
 int
 arp_resolve(uint32 ip, uint8 *mac_out, struct mbuf *pending_m)
 {
@@ -191,11 +184,11 @@ arp_resolve(uint32 ip, uint8 *mac_out, struct mbuf *pending_m)
       for (int j = 0; j < ETH_ADDR_LEN; j++)
         mac_out[j] = arp_cache.entries[i].mac[j];
       release(&arp_cache.lock);
-      return 0; // Đã tìm thấy MAC
+      return 0; // da co mac trong cache
     }
   }
 
-  // Chưa có trong cache: đưa gói tin vào pending_queue và gửi ARP Request
+  // chua co trong cache: treo goi tin vao pending_queue va gui arp request
   if (pending_m) {
     int slot = -1;
     for (int i = 0; i < ARP_TABLE_SIZE; i++) {
@@ -206,17 +199,16 @@ arp_resolve(uint32 ip, uint8 *mac_out, struct mbuf *pending_m)
     }
     if (slot >= 0) {
       arp_cache.entries[slot].ip    = ip;
-      arp_cache.entries[slot].valid = 0; // Chưa có MAC, chờ Reply
-      // Nối vào đầu pending_queue
+      arp_cache.entries[slot].valid = 0; // chua co mac, cho reply
       pending_m->next = arp_cache.entries[slot].pending_queue;
       arp_cache.entries[slot].pending_queue = pending_m;
     }
     release(&arp_cache.lock);
-    // Phát broadcast ARP Request
+    // broadcast arp request
     arp_send_request(ip);
     return -1;
   }
 
   release(&arp_cache.lock);
-  return -1; // Đang chờ giải ARP
+  return -1; // dang cho arp reply
 }

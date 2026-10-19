@@ -1,8 +1,4 @@
-// ============================================================================
-// Thành viên 3 (TV3): Tầng Socket VFS, Web Server httpd & Test/Demo
-// File: kernel/sock.c
-// Nhiệm vụ: Tầng Socket VFS, gắn Socket vào struct file (read/write/close)
-// ============================================================================
+// socket layer tren vfs cho xv6
 
 #include "types.h"
 #include "riscv.h"
@@ -38,7 +34,7 @@ sock_init(void)
   release(&sock_table.lock);
 }
 
-// Cấp phát cấu trúc socket
+// lay socket trong tu bang
 struct socket*
 sock_alloc(void)
 {
@@ -65,7 +61,7 @@ sock_alloc(void)
   return s;
 }
 
-// Cấp phát cấu trúc socket cho một PCB đã có sẵn (khi accept)
+// cap phat socket struct cho pcb moi tao khi accept
 struct socket*
 sock_alloc_for_pcb(struct tcp_pcb *pcb)
 {
@@ -92,7 +88,7 @@ sock_alloc_for_pcb(struct tcp_pcb *pcb)
   return s;
 }
 
-// Báo hiệu EOF vào socket rx ringbuf khi đối phương gửi FIN
+// set co eof vao rx_buf khi remote gui fin
 void
 sock_push_eof(struct socket *s)
 {
@@ -104,7 +100,7 @@ sock_push_eof(struct socket *s)
   release(&s->rx_buf.lock);
 }
 
-// Đóng socket và giải phóng tài nguyên
+// dong socket va giai phong pcb/socket struct
 void
 sock_close(struct socket *s)
 {
@@ -143,7 +139,7 @@ sock_close(struct socket *s)
   release(&s->lock);
 }
 
-// Hàm đọc dữ liệu từ socket qua giao diện struct file
+// read du lieu tu socket vao user space
 int
 sock_read(struct socket *s, uint64 addr, int n)
 {
@@ -153,7 +149,7 @@ sock_read(struct socket *s, uint64 addr, int n)
   if (!s || n <= 0)
     return 0;
 
-  // Lần đọc đầu tiên: sleep chờ nếu ringbuf chưa có dữ liệu (block)
+  // doc block dau tien, neu chua co data thi sleep cho
   int chunk = n;
   if (chunk > (int)sizeof(kbuf))
     chunk = sizeof(kbuf);
@@ -166,7 +162,7 @@ sock_read(struct socket *s, uint64 addr, int n)
     return -1;
   total_read += r;
 
-  // Tiếp tục vét thêm dữ liệu NẾU trong ringbuf còn sẵn (non-blocking)
+  // neu van con data trong ringbuf thi doc tiep luon khong block
   while (total_read < n && ringbuf_avail(&s->rx_buf) > 0) {
     chunk = n - total_read;
     if (chunk > (int)sizeof(kbuf))
@@ -184,7 +180,7 @@ sock_read(struct socket *s, uint64 addr, int n)
   return total_read;
 }
 
-// Hàm ghi dữ liệu vào socket qua giao diện struct file
+// ghi du lieu tu user space xuong socket
 int
 sock_write(struct socket *s, uint64 addr, int n)
 {
@@ -196,16 +192,15 @@ sock_write(struct socket *s, uint64 addr, int n)
   struct tcp_pcb *pcb = s->pcb;
 
   while (total_written < n) {
-    // Sliding Window flow control: giới hạn số lượng segment unacknowledged (in-flight)
-    // để tránh tràn mbuf pool và thích ứng với Receive Window
+    // flow control: gioi han so goi in-flight tranh tran buffer va nghen mang
     acquire(&pcb->lock);
     while (pcb->state == TCP_ESTABLISHED || pcb->state == TCP_CLOSE_WAIT) {
       uint32 in_flight = pcb->snd_nxt - pcb->snd_una;
-      // Cho phép tối đa 16 segments in-flight (~22 KB)
+      // toi da 16 goi in-flight
       if (in_flight < 16 * 1400) {
         break;
       }
-      // Quá nhiều gói đang chờ ACK: sleep chờ ACK từ client giải phóng
+      // doi ack de co window moi gui tiep
       sleep_prepare(pcb);
       release(&pcb->lock);
       sleep();
@@ -222,7 +217,7 @@ sock_write(struct socket *s, uint64 addr, int n)
 
     struct mbuf *m = mbufalloc(MBUF_DEFAULT_HEAD);
     if (!m) {
-      // Tạm thời hết mbuf: chờ giải phóng mbuf từ ACK hoặc timer
+      // het mbuf thi doi timer hoac ack giai phong bot
       acquire(&pcb->lock);
       sleep_prepare(pcb);
       release(&pcb->lock);
@@ -253,7 +248,7 @@ sock_write(struct socket *s, uint64 addr, int n)
   return total_written;
 }
 
-// Gắn socket vào một địa chỉ IP và cổng Port
+// bind dia chi ip va port vao socket
 int
 sock_bind(struct socket *s, uint32 ip, uint16 port)
 {
@@ -266,7 +261,7 @@ sock_bind(struct socket *s, uint32 ip, uint16 port)
   return 0;
 }
 
-// Chuyển socket sang trạng thái lắng nghe kết nối
+// chuyen socket sang trang thai listen
 int
 sock_listen(struct socket *s, int backlog)
 {
@@ -280,7 +275,7 @@ sock_listen(struct socket *s, int backlog)
   return 0;
 }
 
-// Chấp nhận kết nối từ hàng đợi backlog
+// lay ket noi tu hang doi backlog
 struct socket*
 sock_accept(struct socket *s)
 {
@@ -288,7 +283,7 @@ sock_accept(struct socket *s)
 
   acquire(&s->lock);
   while (s->backlog_q == 0) {
-    // Chưa có kết nối đến: sleep chờ bắt tay 3 bước hoàn tất
+    // chua co client thi sleep cho bat tay xong
     sleep_prepare(s);
     release(&s->lock);
     sleep();
@@ -304,7 +299,7 @@ sock_accept(struct socket *s)
   return newsock;
 }
 
-// Khởi tạo kết nối chủ động tới server từ xa
+// chu dong connect toi remote host
 int
 sock_connect(struct socket *s, uint32 ip, uint16 port)
 {

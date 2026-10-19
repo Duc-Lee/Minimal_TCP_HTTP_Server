@@ -11,6 +11,29 @@ A minimal in-kernel TCP/IP network stack, BSD socket layer, and HTTP/1.0 server 
 - **Socket API**: BSD-style syscalls (`socket`, `bind`, `listen`, `accept`, `connect`) integrated into the xv6 VFS as `FD_SOCK` files.
 - **HTTP Server**: User-space HTTP/1.0 daemon (`httpd`) serving static files and streaming 1 MB test payloads.
 
+## Project Structure
+
+```
+kernel/
+├── e1000.c, e1000_dev.h   # E1000 PCI NIC driver & 10% packet loss filter
+├── eth.c                  # Ethernet framing (L2)
+├── arp.c                  # ARP resolution and cache
+├── ip.c                   # IPv4 input/output (L3)
+├── checksum.c             # RFC 1071 Internet checksum
+├── tcp.c                  # TCP PCB management, connection hash table, timer
+├── tcp_input.c            # TCP state transitions, ACK processing, fast retransmit
+├── tcp_output.c           # TCP segment formatting and retransmission queue
+├── tcp_timer.c            # Jacobson/Karels RTO update & periodic tick handler
+├── ringbuf.c              # Lock-protected FIFO ring buffer for sockets
+├── sock.c, sysnet.c       # Socket abstraction, VFS integration, network syscalls
+└── net.h                  # Network headers, structs, and protocol constants
+user/
+├── httpd.c                # HTTP/1.0 web server implementation
+└── user.h                 # User-space syscall prototypes
+```
+
+Detailed Phase 1 implementation report and architecture breakdown: [doc/phase1.md](doc/phase1.md).
+
 ## Requirements
 
 Install the RISC-V cross-compiler and QEMU:

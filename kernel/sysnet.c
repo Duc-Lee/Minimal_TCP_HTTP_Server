@@ -1,8 +1,4 @@
-// ============================================================================
-// Thành viên 3 (TV3): Tầng Socket VFS, Web Server httpd & Test/Demo
-// File: kernel/sysnet.c
-// Nhiệm vụ: Các System Calls mạng (socket, bind, listen, accept, connect)
-// ============================================================================
+// cac syscall mang: socket, bind, listen, accept, connect
 
 #include "types.h"
 #include "riscv.h"
@@ -30,7 +26,7 @@ sock_fdalloc(struct file *f)
   return -1;
 }
 
-// syscall: int socket(int domain, int type, int protocol)
+// tao socket va gan vao file descriptor
 uint64
 sys_socket(void)
 {
@@ -56,7 +52,7 @@ sys_socket(void)
     return -1;
   }
 
-  // Gắn socket vào struct file với loại FD_SOCK
+  // gan socket struct vao file table voi type FD_SOCK
   f->type = FD_SOCK;
   f->readable = 1;
   f->writable = 1;

@@ -1,16 +1,11 @@
-// ============================================================================
-// Thành viên 1 (TV1): Hạ tầng Mạng, Driver L2/L3 & Zero-Copy
-// File: kernel/checksum.c
-// Nhiệm vụ: Hàm tính Checksum RFC 1071 cho IP và TCP Pseudo Header
-// ============================================================================
-
+// tinh internet checksum rfc 1071
 #include "types.h"
 #include "riscv.h"
 #include "defs.h"
 #include "param.h"
 #include "net.h"
 
-// Thuật toán Internet Checksum RFC 1071 chuẩn
+// tinh checksum rfc 1071 bu 1
 uint16
 in_cksum(const void *buf, int len)
 {
@@ -23,12 +18,12 @@ in_cksum(const void *buf, int len)
     len -= 2;
   }
 
-  // Nếu độ dài lẻ, cộng byte cuối cùng (padded với 0 ở byte thấp)
+  // xu ly byte le neu co
   if (len == 1) {
     sum += (uint16)data[0] << 8;
   }
 
-  // Gập tổng 32-bit thành 16-bit
+  // gap tong 32-bit thanh 16-bit
   while (sum >> 16) {
     sum = (sum & 0xffff) + (sum >> 16);
   }
@@ -36,7 +31,7 @@ in_cksum(const void *buf, int len)
   return htons((uint16)(~sum));
 }
 
-// Tính TCP checksum kèm Pseudo Header
+// tinh tcp checksum kem pseudo header
 uint16
 tcp_checksum(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
 {
@@ -56,7 +51,7 @@ tcp_checksum(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
     sum += ((uint16)ph[i] << 8) | (uint16)ph[i + 1];
   }
 
-  // Cộng tiếp checksum từ TCP header và payload
+  // cong tiep checksum tu tcp header va payload
   const uint8 *data = (const uint8 *)m->head;
   int len = m->len;
   while (len > 1) {

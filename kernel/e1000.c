@@ -1,9 +1,4 @@
-// ============================================================================
-// Thành viên 1 (TV1): Hạ tầng Mạng, Driver L2/L3 & Zero-Copy
-// File: kernel/e1000.c
-// Nhiệm vụ: Driver E1000 DMA Ring, NAPI Polling & bộ lọc giả lập rớt gói 10%
-// ============================================================================
-
+// driver e1000 pci nic cho xv6
 #include "types.h"
 #include "riscv.h"
 #include "defs.h"
@@ -18,27 +13,26 @@
 static volatile uint32 *regs;
 struct spinlock e1000_lock;
 
-// DMA descriptor rings — phải 16-byte aligned
+// dma ring buffers, can align 16 byte
 __attribute__((aligned(16))) static struct tx_desc tx_ring[TX_RING_SIZE];
 static struct mbuf *tx_mbufs[TX_RING_SIZE];
 
 __attribute__((aligned(16))) static struct rx_desc rx_ring[RX_RING_SIZE];
 static struct mbuf *rx_mbufs[RX_RING_SIZE];
 
-// MAC address của card mạng E1000
+// mac cua card e1000 trong qemu
 uint8 local_mac[ETH_ADDR_LEN] = {0x52, 0x54, 0x00, 0x12, 0x34, 0x56};
 
-// ─── Bộ lọc giả lập rớt gói 10% (Packet Loss Simulator) ─────────────────────
+// gia lap rot goi 10% bang lcg de test tcp retransmit
 static uint32 packet_loss_seed = 12345;
 static int
 should_drop_packet_10pct(void)
 {
-  // LCG random generator đơn giản trong kernel
   packet_loss_seed = (packet_loss_seed * 1103515245 + 12345) & 0x7fffffff;
-  return (packet_loss_seed % 100) < 10; // Rớt 10% gói tin
+  return (packet_loss_seed % 100) < 10;
 }
 
-// ─── e1000_init: Khởi tạo DMA ring TX/RX ────────────────────────────────────
+// khoi tao dma ring tx va rx
 void
 e1000_init(uint32 *e1000_regs)
 {
@@ -48,12 +42,11 @@ e1000_init(uint32 *e1000_regs)
 
   acquire(&e1000_lock);
 
-  // [E1000 14.5] Không reset thiết bị vì QEMU e1000 reset không đúng chuẩn
   (void)regs[E1000_STATUS / 4];
 
-  // ── TX Ring setup ──────────────────────────────────────────────────────────
+  // setup tx ring
   for (i = 0; i < TX_RING_SIZE; i++) {
-    tx_ring[i].status = E1000_TXD_STAT_DD; // Đánh dấu tất cả descriptor là "free"
+    tx_ring[i].status = E1000_TXD_STAT_DD;
     tx_mbufs[i] = 0;
   }
 
@@ -64,13 +57,13 @@ e1000_init(uint32 *e1000_regs)
   regs[E1000_TDH / 4]   = 0;
   regs[E1000_TDT / 4]   = 0;
 
-  // Bật transmit: EN | PSP | CT=0x10 | COLD=0x40
+  // bat transmit: en | psp | ct=0x10 | cold=0x40
   regs[E1000_TCTL / 4] = E1000_TCTL_EN | E1000_TCTL_PSP |
                           (0x10 << 4) | (0x40 << 12);
-  // TIPG: inter-packet gap theo IEEE 802.3 standard (TIPG = 10 | 8<<10 | 6<<20)
+  // tipg: inter-packet gap theo ieee 802.3
   regs[E1000_TIPG / 4] = 10 | (8 << 10) | (6 << 20);
 
-  // ── RX Ring setup ──────────────────────────────────────────────────────────
+  // setup rx ring
   for (i = 0; i < RX_RING_SIZE; i++) {
     rx_mbufs[i] = mbufalloc(0);
     if (!rx_mbufs[i])
@@ -79,14 +72,14 @@ e1000_init(uint32 *e1000_regs)
     rx_ring[i].status = 0;
   }
 
-  // Ghi MAC address vào thanh ghi RA[0]
+  // nap dia chi mac vao thanh ghi ra[0]
   uint32 mac_lo = local_mac[0] | (local_mac[1] << 8) |
                   (local_mac[2] << 16) | (local_mac[3] << 24);
-  uint32 mac_hi = local_mac[4] | (local_mac[5] << 8) | (1u << 31); // AV bit
+  uint32 mac_hi = local_mac[4] | (local_mac[5] << 8) | (1u << 31);
   regs[E1000_RA / 4]       = mac_lo;
   regs[(E1000_RA + 4) / 4] = mac_hi;
 
-  // Xóa bảng Multicast
+  // clear bang multicast
   for (i = 0; i < 128; i++)
     regs[(E1000_MTA / 4) + i] = 0;
 
@@ -95,28 +88,27 @@ e1000_init(uint32 *e1000_regs)
   regs[E1000_RDBAH / 4] = (rx_phys >> 32) & 0xffffffff;
   regs[E1000_RDLEN / 4] = RX_RING_SIZE * sizeof(struct rx_desc);
   regs[E1000_RDH / 4]   = 0;
-  regs[E1000_RDT / 4]   = RX_RING_SIZE - 1; // Tail = last descriptor
+  regs[E1000_RDT / 4]   = RX_RING_SIZE - 1;
 
-  // Bật nhận: EN | BAM (chấp nhận broadcast) | SZ_2048 | SECRC
+  // bat receive: cho phep nhan broadcast
   regs[E1000_RCTL / 4] = E1000_RCTL_EN | E1000_RCTL_BAM |
                           E1000_RCTL_SZ_2048 | E1000_RCTL_SECRC;
 
-  // Bật ngắt RXT0 (receive timer interrupt)
+  // bat ngat rxt0
   regs[E1000_IMS / 4] = E1000_ICR_RXT0;
 
-  // Force link up
   regs[E1000_CTL / 4] |= E1000_CTL_SLU;
 
   release(&e1000_lock);
 }
 
-// ─── e1000_transmit: Gửi gói tin qua DMA TX Ring ────────────────────────────
+// truyen goi qua dma tx ring
 int
 e1000_transmit(struct mbuf *m)
 {
   acquire(&e1000_lock);
 
-  // Không giả lập rớt gói đối với gói ARP (L2 resolution quan trọng)
+  // khong drop goi arp de tranh mat phan giai mac
   uint16 eth_type = 0;
   if (m->len >= 14)
     eth_type = ntohs(*(uint16 *)(m->head + 12));
@@ -124,89 +116,77 @@ e1000_transmit(struct mbuf *m)
   if (eth_type != ETH_TYPE_ARP && should_drop_packet_10pct()) {
     release(&e1000_lock);
     mbuffree(m);
-    return 0; // Giả lập gói tin bị thất thoát — TCP sẽ retransmit sau RTO
+    return 0; // drop goi de test retransmit
   }
 
-  // Lấy vị trí tail hiện tại của TX ring
   uint32 tdt = regs[E1000_TDT / 4];
   struct tx_desc *d = &tx_ring[tdt % TX_RING_SIZE];
 
-  // Kiểm tra descriptor đã được hardware giải phóng (cờ DD set)
   if (!(d->status & E1000_TXD_STAT_DD)) {
-    // TX ring đầy — không thể gửi
+    // tx ring day
     release(&e1000_lock);
     mbuffree(m);
     return -1;
   }
 
-  // Giải phóng mbuf cũ nếu còn
   if (tx_mbufs[tdt % TX_RING_SIZE]) {
     mbuffree(tx_mbufs[tdt % TX_RING_SIZE]);
     tx_mbufs[tdt % TX_RING_SIZE] = 0;
   }
 
-  // Ghi DMA address và độ dài vào descriptor
   d->addr   = (uint64)m->head;
   d->length = m->len;
   d->cmd    = E1000_TXD_CMD_EOP | E1000_TXD_CMD_IFCS | E1000_TXD_CMD_RS;
   d->status = 0;
   tx_mbufs[tdt % TX_RING_SIZE] = m;
 
-  // Tăng TDT để báo cho hardware có descriptor mới
   regs[E1000_TDT / 4] = (tdt + 1) % TX_RING_SIZE;
 
   release(&e1000_lock);
   return 0;
 }
 
-// ─── e1000_recv: Nhận gói tin từ DMA RX Ring (gọi khi có ngắt) ──────────────
+// quet rx ring khi co ngat nhan goi
 void
 e1000_recv(void)
 {
   for (;;) {
-    // Tính index descriptor tiếp theo sau tail
     uint32 rdt = regs[E1000_RDT / 4];
     uint32 next = (rdt + 1) % RX_RING_SIZE;
     struct rx_desc *d = &rx_ring[next];
 
-    // Kiểm tra hardware đã điền dữ liệu vào descriptor chưa (cờ DD)
     if (!(d->status & E1000_RXD_STAT_DD))
-      break; // Không còn gói tin mới
+      break;
 
-    // Đặt chiều dài cho mbuf và truyền lên tầng L2
     struct mbuf *m = rx_mbufs[next];
     m->len = d->length;
 
-    // Cấp phát mbuf mới thay thế cho descriptor này
+    // cap mbuf moi bu vao slot
     struct mbuf *newm = mbufalloc(0);
     if (newm) {
       rx_ring[next].addr   = (uint64)newm->head;
       rx_ring[next].status = 0;
       rx_mbufs[next]       = newm;
     } else {
-      // Nếu không cấp được mbuf mới: dùng lại mbuf cũ, bỏ gói này
       rx_ring[next].status = 0;
       regs[E1000_RDT / 4] = next;
       continue;
     }
 
-    // Cập nhật RDT để báo cho hardware descriptor này đã được xử lý
     regs[E1000_RDT / 4] = next;
 
-    // Gửi lên tầng Ethernet (không giữ lock khi gọi eth_input để tránh deadlock)
+    // chuyen len eth_input, khong giu lock tranh deadlock
     eth_input(m);
   }
 }
 
-// ─── e1000_intr: Xử lý ngắt card mạng E1000 ────────────────────────────────
+// xu ly ngat card e1000
 void
 e1000_intr(void)
 {
-  // Đọc và xóa nguyên nhân ngắt qua thanh ghi ICR
   uint32 icr = regs[E1000_ICR / 4];
 
   if (icr & E1000_ICR_RXT0) {
-    // Ngắt nhận gói tin — xử lý toàn bộ RX ring
     e1000_recv();
   }
 }

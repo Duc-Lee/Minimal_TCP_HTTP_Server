@@ -1,5 +1,1 @@
-// ============================================================================
-// File: kernel/tcp_cc.c
-// Giai đoạn 2 & 3: Kiểm soát tắc nghẽn (TCP Reno & Google BBR)
-// Hiện tại để trống cho Giai đoạn 2 & 3
-// ============================================================================
+// kiem soat tac nghen tcp (reno / bbr)

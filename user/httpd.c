@@ -1,8 +1,4 @@
-// ============================================================================
-// Thành viên 3 (TV3): Tầng Socket VFS, Web Server httpd & Test/Demo
-// File: user/httpd.c
-// Giai đoạn 1: Web Server httpd (HTTP/1.0 tải file tĩnh 1 MB)
-// ============================================================================
+// web server don gian chay http 1.0 phuc vu file tinh
 
 #include "kernel/types.h"
 #include "kernel/stat.h"
@@ -12,7 +8,7 @@
 #define HTTP_PORT 80
 #define BUF_SIZE  1024
 
-// Xử lý một request HTTP/1.0 từ client
+// xu ly request http 1.0 tu client
 void
 handle_http_client(int client_fd)
 {
@@ -24,7 +20,7 @@ handle_http_client(int client_fd)
   }
   req[n] = '\0';
 
-  // 1. Kiểm tra phương thức GET
+  // chi ho tro GET
   if (req[0] != 'G' || req[1] != 'E' || req[2] != 'T' || req[3] != ' ') {
     const char *bad = "HTTP/1.0 400 Bad Request\r\n\r\n";
     write(client_fd, bad, strlen(bad));
@@ -32,7 +28,7 @@ handle_http_client(int client_fd)
     return;
   }
 
-  // 2. Phân tích đường dẫn tệp
+  // parse lay path file can lay
   char path[128];
   int i = 4, j = 0;
   if (req[i] == '/')
@@ -49,11 +45,11 @@ handle_http_client(int client_fd)
 
   printf("httpd: target path='%s'\n", path);
 
-  // 3. Mở file từ hệ thống tệp
+  // mo file tren he thong file
   int file_fd = open(path, O_RDONLY);
   if (file_fd < 0) {
     if (strcmp(path, "file1mb") == 0 || strcmp(path, "1mb.bin") == 0) {
-      // Phục vụ dữ liệu 1 MB (1024 * 1024 bytes) chuẩn pattern
+      // test truyen file 1mb sinh du lieu mau
       const char *hdr = "HTTP/1.0 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: 1048576\r\n\r\n";
       write(client_fd, hdr, strlen(hdr));
 
@@ -81,11 +77,11 @@ handle_http_client(int client_fd)
     return;
   }
 
-  // 4. Gửi HTTP header 200 OK
+  // gui header 200 ok
   const char *hdr = "HTTP/1.0 200 OK\r\nContent-Type: application/octet-stream\r\n\r\n";
   write(client_fd, hdr, strlen(hdr));
 
-  // 5. Đọc và truyền dữ liệu theo từng khối (hỗ trợ file tĩnh)
+  // doc va truyen du lieu theo chunk
   char file_buf[BUF_SIZE];
   int bytes_read;
   while ((bytes_read = read(file_fd, file_buf, sizeof(file_buf))) > 0) {

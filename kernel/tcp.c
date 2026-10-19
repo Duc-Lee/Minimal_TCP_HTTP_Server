@@ -1,9 +1,4 @@
-// ============================================================================
-// Thành viên 2 (TV2): Lõi Giao vận TCP, RTO Timer
-// File: kernel/tcp.c
-// Nhiệm vụ: Quản lý struct tcp_pcb, bảng băm kết nối & 11 trạng thái TCP FSM
-// ============================================================================
-
+// quan ly tcp pcb va bang bam ket noi
 #include "types.h"
 #include "riscv.h"
 #include "defs.h"
@@ -19,7 +14,7 @@ static struct {
   struct tcp_pcb pcbs[TCP_PCB_POOL_SIZE];
   struct tcp_pcb *free_list;
   struct tcp_pcb *hash_table[TCP_HASH_SIZE];
-  struct tcp_pcb *listen_list; // Danh sách các PCB đang LISTEN
+  struct tcp_pcb *listen_list; // danh sach pcb dang listen
 } tcp_mgr;
 
 static inline uint32
@@ -48,7 +43,7 @@ tcp_init(void)
   release(&tcp_mgr.lock);
 }
 
-// Cấp phát một tcp_pcb mới
+// cap phat pcb moi
 struct tcp_pcb*
 tcp_pcb_alloc(void)
 {
@@ -60,7 +55,7 @@ tcp_pcb_alloc(void)
     tcp_mgr.free_list = pcb->next;
     pcb->next         = 0;
     pcb->state        = TCP_CLOSED;
-    pcb->iss          = (uint32)(ticks * 1000 + 1); // ISN động dựa trên clock
+    pcb->iss          = (uint32)(ticks * 1000 + 1); // isn tinh theo clock ticks
     pcb->snd_nxt      = pcb->iss;
     pcb->snd_una      = pcb->iss;
     pcb->snd_wnd      = 0;
@@ -69,7 +64,7 @@ tcp_pcb_alloc(void)
     pcb->irs          = 0;
     pcb->srtt         = 0;
     pcb->rttvar       = 0;
-    pcb->rto          = 200; // 200 ms ban đầu (thích hợp mạng LAN/QEMU)
+    pcb->rto          = 200; // rto khoi tao 200ms cho qemu lan
     pcb->backoff      = 0;
     pcb->dup_acks     = 0;
     pcb->retransmit_q = 0;
@@ -85,7 +80,7 @@ tcp_pcb_alloc(void)
   return pcb;
 }
 
-// Thêm PCB vào bảng băm (dùng khi đã có 4-tuple đầy đủ)
+// them pcb vao hash table khi da co du 4-tuple
 void
 tcp_pcb_insert(struct tcp_pcb *pcb)
 {
@@ -97,7 +92,7 @@ tcp_pcb_insert(struct tcp_pcb *pcb)
   release(&tcp_mgr.lock);
 }
 
-// Thêm PCB vào danh sách listen
+// them vao listen list
 void
 tcp_pcb_set_listen(struct tcp_pcb *pcb)
 {
@@ -107,14 +102,14 @@ tcp_pcb_set_listen(struct tcp_pcb *pcb)
   release(&tcp_mgr.lock);
 }
 
-// Giải phóng tcp_pcb và xóa khỏi cả hai danh sách
+// giai phong tcp_pcb
 void
 tcp_pcb_free(struct tcp_pcb *pcb)
 {
   if (!pcb)
     return;
 
-  // Giải phóng retransmit queue
+  // free retransmit queue
   struct mbuf *p = pcb->retransmit_q;
   while (p) {
     struct mbuf *next = p->next;
@@ -126,7 +121,7 @@ tcp_pcb_free(struct tcp_pcb *pcb)
 
   acquire(&tcp_mgr.lock);
 
-  // Xóa khỏi hash table
+  // xoa khoi hash table
   uint32 h = tcp_hash_fn(pcb->local_ip, pcb->local_port,
                          pcb->remote_ip, pcb->remote_port);
   struct tcp_pcb **curr = &tcp_mgr.hash_table[h];
@@ -135,7 +130,7 @@ tcp_pcb_free(struct tcp_pcb *pcb)
     curr = &(*curr)->next;
   }
 
-  // Xóa khỏi listen list
+  // xoa khoi listen list
   curr = &tcp_mgr.listen_list;
   while (*curr) {
     if (*curr == pcb) { *curr = pcb->next; break; }
@@ -148,13 +143,13 @@ tcp_pcb_free(struct tcp_pcb *pcb)
   release(&tcp_mgr.lock);
 }
 
-// Tra cứu PCB dựa trên 4-tuple — trả về PCB ESTABLISHED hoặc LISTEN phù hợp
+// tim pcb theo 4-tuple hoac listen port
 struct tcp_pcb*
 tcp_lookup(uint32 src_ip, uint16 src_port, uint32 dst_ip, uint16 dst_port)
 {
   struct tcp_pcb *pcb;
 
-  // Tìm kết nối đã thiết lập trong hash table (exact match)
+  // tim trong hash table truoc
   uint32 h = tcp_hash_fn(dst_ip, dst_port, src_ip, src_port);
   acquire(&tcp_mgr.lock);
   for (pcb = tcp_mgr.hash_table[h]; pcb; pcb = pcb->next) {
@@ -165,7 +160,7 @@ tcp_lookup(uint32 src_ip, uint16 src_port, uint32 dst_ip, uint16 dst_port)
     }
   }
 
-  // Tìm PCB đang LISTEN trên local_port tương ứng
+  // tim pcb dang listen tren local_port
   for (pcb = tcp_mgr.listen_list; pcb; pcb = pcb->next) {
     if (pcb->state == TCP_LISTEN && pcb->local_port == dst_port) {
       release(&tcp_mgr.lock);
@@ -177,7 +172,7 @@ tcp_lookup(uint32 src_ip, uint16 src_port, uint32 dst_ip, uint16 dst_port)
   return 0;
 }
 
-// ─── tcp_timer_process: Xử lý retransmission và TIME_WAIT cho tất cả PCB ─────
+// xu ly retransmission va time_wait dinh ky
 void
 tcp_timer_process(void)
 {
@@ -192,7 +187,7 @@ tcp_timer_process(void)
       continue;
     }
 
-    // Kiểm tra hết hạn TIME_WAIT (2*MSL)
+    // het han time_wait
     if (pcb->state == TCP_TIME_WAIT) {
       if (pcb->rto_deadline > 0 && ticks >= pcb->rto_deadline) {
         pcb->state = TCP_CLOSED;
@@ -201,16 +196,16 @@ tcp_timer_process(void)
       continue;
     }
 
-    // Kiểm tra retransmit queue
+    // kiem tra timeout retransmit
     if (pcb->retransmit_q && pcb->rto_deadline > 0 && ticks >= pcb->rto_deadline) {
       struct mbuf *m = pcb->retransmit_q;
 
-      // Exponential backoff
+      // exponential backoff
       pcb->backoff++;
       pcb->rto = pcb->rto * 2;
       if (pcb->rto > 2000)
         pcb->rto = 2000;
-      pcb->rto_deadline = ticks + (pcb->rto / 10 ? pcb->rto / 10 : 1); // 100Hz ticks
+      pcb->rto_deadline = ticks + (pcb->rto / 10 ? pcb->rto / 10 : 1);
 
       if (pcb->backoff > 12) {
         pcb->state = TCP_CLOSED;
@@ -218,7 +213,7 @@ tcp_timer_process(void)
         continue;
       }
 
-      // Clone mbuf segment để truyền lại
+      // truyen lai goi dau queue
       struct mbuf *copy = mbufalloc(MBUF_DEFAULT_HEAD);
       if (copy) {
         char *dst = mbufput(copy, m->len);

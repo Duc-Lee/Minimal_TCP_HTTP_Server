@@ -1,5 +1,1 @@
-// ============================================================================
-// File: kernel/sendfile.c
-// Giai đoạn 3: Zero-Copy sys_sendfile() (Tối ưu chuẩn Hệ điều hành)
-// Hiện tại để trống cho Giai đoạn 3
-// ============================================================================
+// syscall sendfile ho tro zero-copy tu vfs xuong socket

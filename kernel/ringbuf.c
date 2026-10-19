@@ -1,8 +1,4 @@
-// ============================================================================
-// Thành viên 3 (TV3): Tầng Socket VFS, Web Server httpd & Test/Demo
-// File: kernel/ringbuf.c
-// Nhiệm vụ: Bộ đệm vòng ring_buf với cơ chế đồng bộ hóa sleep/wakeup
-// ============================================================================
+// ring buffer dung cho socket rx va tx co spinlock va sleep/wakeup
 
 #include "types.h"
 #include "riscv.h"
@@ -23,7 +19,7 @@ ringbuf_init(struct ringbuf *rb)
   release(&rb->lock);
 }
 
-// Số byte dữ liệu hiện có trong ring buffer
+// so byte hien co san trong buffer
 int
 ringbuf_avail(struct ringbuf *rb)
 {
@@ -33,7 +29,7 @@ ringbuf_avail(struct ringbuf *rb)
   return count;
 }
 
-// Số byte dung lượng còn trống trong ring buffer
+// so byte con trong de ghi
 int
 ringbuf_free_space(struct ringbuf *rb)
 {
@@ -43,7 +39,7 @@ ringbuf_free_space(struct ringbuf *rb)
   return free_bytes;
 }
 
-// Ghi dữ liệu vào ring buffer (nếu đầy sẽ sleep chờ có chỗ trống)
+// ghi vao ring buffer, day thi sleep cho doc bot
 int
 ringbuf_write(struct ringbuf *rb, const char *data, int len)
 {
@@ -52,7 +48,7 @@ ringbuf_write(struct ringbuf *rb, const char *data, int len)
   acquire(&rb->lock);
   while (written < len) {
     while (rb->count == RINGBUF_SIZE) {
-      // Buffer đã đầy: sleep trên con trỏ rb chờ người đọc giải phóng
+      // day roi thi sleep cho doc
       sleep_prepare(rb);
       release(&rb->lock);
       sleep();
@@ -70,7 +66,7 @@ ringbuf_write(struct ringbuf *rb, const char *data, int len)
       rb->count++;
     }
 
-    // Đánh thức bên đọc đang sleep
+    // bao cho ben doc day
     wakeup(rb);
   }
   release(&rb->lock);
@@ -78,7 +74,7 @@ ringbuf_write(struct ringbuf *rb, const char *data, int len)
   return written;
 }
 
-// Đọc dữ liệu từ ring buffer (nếu rỗng sẽ sleep chờ có dữ liệu)
+// doc tu ring buffer, rong thi sleep cho den khi co data hoac eof
 int
 ringbuf_read(struct ringbuf *rb, char *data, int len)
 {
@@ -88,9 +84,9 @@ ringbuf_read(struct ringbuf *rb, char *data, int len)
   while (rb->count == 0) {
     if (rb->eof) {
       release(&rb->lock);
-      return 0; // Đã nhận FIN/đóng kết nối (EOF)
+      return 0; // da nhan fin hoac dong ket noi
     }
-    // Buffer rỗng: sleep chờ bên ghi nạp dữ liệu
+    // chua co data thi sleep cho
     sleep_prepare(rb);
     release(&rb->lock);
     sleep();
@@ -107,7 +103,7 @@ ringbuf_read(struct ringbuf *rb, char *data, int len)
     rb->count--;
   }
 
-  // Đánh thức bên ghi đang sleep
+  // bao cho ben ghi biet da co cho trong
   wakeup(rb);
   release(&rb->lock);
 
