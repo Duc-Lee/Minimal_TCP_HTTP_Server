@@ -69,4 +69,3 @@ tcp_checksum(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
 
   return htons((uint16)(~sum));
 }
-

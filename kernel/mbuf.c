@@ -28,7 +28,7 @@ mbufinit(void)
 }
 
 // lay mbuf tu pool, chot san headroom de prepended header
-struct mbuf*
+struct mbuf *
 mbufalloc(unsigned int headroom)
 {
   struct mbuf *m;
@@ -68,7 +68,7 @@ mbuffree(struct mbuf *m)
 }
 
 // day nguoc con tro head ve truoc de nhet header moi
-char*
+char *
 mbufpush(struct mbuf *m, unsigned int len)
 {
   if (m->head - len < m->buf)
@@ -80,7 +80,7 @@ mbufpush(struct mbuf *m, unsigned int len)
 }
 
 // cat bot header o dau va dich head ra sau
-char*
+char *
 mbufpull(struct mbuf *m, unsigned int len)
 {
   char *temp = m->head;
@@ -93,7 +93,7 @@ mbufpull(struct mbuf *m, unsigned int len)
 }
 
 // noi them du lieu vao duoi
-char*
+char *
 mbufput(struct mbuf *m, unsigned int len)
 {
   char *temp = m->head + m->len;

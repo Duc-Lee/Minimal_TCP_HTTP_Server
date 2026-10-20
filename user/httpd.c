@@ -34,7 +34,8 @@ handle_http_client(int client_fd)
   if (req[i] == '/')
     i++;
 
-  while (req[i] != ' ' && req[i] != '\r' && req[i] != '\n' && req[i] != '\0' && j < sizeof(path) - 1) {
+  while (req[i] != ' ' && req[i] != '\r' && req[i] != '\n' && req[i] != '\0' &&
+         j < sizeof(path) - 1) {
     path[j++] = req[i++];
   }
   path[j] = '\0';
@@ -50,7 +51,8 @@ handle_http_client(int client_fd)
   if (file_fd < 0) {
     if (strcmp(path, "file1mb") == 0 || strcmp(path, "1mb.bin") == 0) {
       // test truyen file 1mb sinh du lieu mau
-      const char *hdr = "HTTP/1.0 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: 1048576\r\n\r\n";
+      const char *hdr =
+        "HTTP/1.0 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: 1048576\r\n\r\n";
       write(client_fd, hdr, strlen(hdr));
 
       char gen_buf[BUF_SIZE];
@@ -71,14 +73,16 @@ handle_http_client(int client_fd)
       close(client_fd);
       return;
     }
-    const char *not_found = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\n404 Not Found";
+    const char *not_found =
+      "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\n404 Not Found";
     write(client_fd, not_found, strlen(not_found));
     close(client_fd);
     return;
   }
 
   // gui header 200 ok
-  const char *hdr = "HTTP/1.0 200 OK\r\nContent-Type: application/octet-stream\r\n\r\n";
+  const char *hdr =
+    "HTTP/1.0 200 OK\r\nContent-Type: application/octet-stream\r\n\r\n";
   write(client_fd, hdr, strlen(hdr));
 
   // doc va truyen du lieu theo chunk

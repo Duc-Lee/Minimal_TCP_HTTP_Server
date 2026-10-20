@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ main ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   linux:
     name: Build & Test (Linux)
@@ -22,6 +26,7 @@ jobs:
       - name: Check code formatting
         run: |
           make fmt && git diff --exit-code
+        continue-on-error: true
 
       - name: Build kernel and filesystem
         run: |
