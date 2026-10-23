@@ -151,3 +151,19 @@ sys_connect(void)
 
   return sock_connect(f->sock, (uint32)ip, (uint16)port);
 }
+
+// syscall: int set_loss_rate(int rate)
+uint64
+sys_set_loss_rate(void)
+{
+  int rate;
+  argint(0, &rate);
+  return e1000_set_loss_rate(rate);
+}
+
+// syscall: int get_loss_rate(void)
+uint64
+sys_get_loss_rate(void)
+{
+  return e1000_get_loss_rate();
+}

@@ -4,35 +4,40 @@ A minimal in-kernel TCP/IP network stack, BSD socket layer, and HTTP/1.0 server 
 
 ## Features
 
-- **Driver (E1000)**: Intel 82540EM DMA ring buffer (16 TX/RX descriptors) with hardware interrupt handling (`RXT0`). Includes an in-driver 10% packet loss simulator to test retransmission.
-- **Ethernet & ARP**: Ethernet II frame encapsulation, dynamic ARP cache with expiration, ARP request broadcast, and ARP reply handling.
+- **Driver (E1000)**: Intel 82540EM DMA ring buffer (16 TX/RX descriptors) with hardware interrupt handling (`RXT0`). Includes an in-driver configurable packet loss simulator (0%–100%) controllable via system calls (`sys_set_loss_rate`, `sys_get_loss_rate`) and user utility (`setloss`).
+- **Ethernet & ARP**: Ethernet II frame encapsulation, dynamic ARP cache with expiration, broadcast request, reply handling, and leak-free pending queue.
 - **IPv4**: IPv4 header parsing/generation, RFC 1071 ones-complement checksum.
-- **TCP (RFC 793)**: Full 11-state FSM, 4-tuple PCB lookup, sliding window flow control, half-close (`TCP_CLOSE_WAIT`), dynamic RTO calculation (Jacobson/Karels, RFC 6298), and Fast Retransmit on 3 duplicate ACKs (RFC 5681).
-- **Socket API**: BSD-style syscalls (`socket`, `bind`, `listen`, `accept`, `connect`) integrated into the xv6 VFS as `FD_SOCK` files.
-- **HTTP Server**: User-space HTTP/1.0 daemon (`httpd`) serving static files and streaming 1 MB test payloads.
+- **TCP (RFC 793)**: Full 11-state FSM, 4-tuple PCB lookup, sliding window flow control, half-close (`TCP_CLOSE_WAIT`), RFC 793 `RST` handling for client timeout/abort, dynamic RTO calculation (Jacobson/Karels, RFC 6298) calibrated to 10 Hz hardware timer, and Fast Retransmit on 3 duplicate ACKs (RFC 5681).
+- **Socket API**: BSD-style syscalls (`socket`, `bind`, `listen`, `accept`, `connect`, `set_loss_rate`, `get_loss_rate`) integrated into xv6 VFS as `FD_SOCK` files with deadlock-free buffer allocation (`mbufalloc_wait`).
+- **HTTP Server**: User-space HTTP/1.0 daemon (`httpd`) serving static files and streaming 1 MB test payloads with reliable delivery under 10% packet loss (completes in 4 seconds at ~252.5 KB/s with matching SHA-256 hash).
 
 ## Project Structure
 
 ```
 kernel/
-├── e1000.c, e1000_dev.h   # E1000 PCI NIC driver & 10% packet loss filter
+├── e1000.c, e1000_dev.h   # E1000 PCI NIC driver & configurable packet loss filter
 ├── eth.c                  # Ethernet framing (L2)
 ├── arp.c                  # ARP resolution and cache
 ├── ip.c                   # IPv4 input/output (L3)
 ├── checksum.c             # RFC 1071 Internet checksum
-├── tcp.c                  # TCP PCB management, connection hash table, timer
-├── tcp_input.c            # TCP state transitions, ACK processing, fast retransmit
-├── tcp_output.c           # TCP segment formatting and retransmission queue
-├── tcp_timer.c            # Jacobson/Karels RTO update & periodic tick handler
+├── tcp.c                  # TCP PCB management, connection hash table, timer process
+├── tcp_input.c            # TCP state transitions, ACK processing, RST recovery, fast retransmit
+├── tcp_output.c           # TCP segment formatting, metadata tracking, and retransmission queue
+├── tcp_timer.c            # Jacobson/Karels RTO update & periodic tick handler (10 Hz)
 ├── ringbuf.c              # Lock-protected FIFO ring buffer for sockets
 ├── sock.c, sysnet.c       # Socket abstraction, VFS integration, network syscalls
 └── net.h                  # Network headers, structs, and protocol constants
 user/
 ├── httpd.c                # HTTP/1.0 web server implementation
+├── setloss.c              # Command-line utility to configure packet loss rate (0% - 100%)
 └── user.h                 # User-space syscall prototypes
+doc/
+├── phase1.md              # Phase 1 Core Deliverables Report
+└── phase2.md              # Phase 2 Kernel Hardening, Deadlock Fix & RTO Calibration Report
 ```
 
-Detailed Phase 1 implementation report and architecture breakdown: [doc/phase1.md](doc/phase1.md).
+- Phase 1 Architecture Breakdown: [doc/phase1.md](doc/phase1.md)
+- Phase 2 Implementation & Troubleshooting Report: [doc/phase2.md](doc/phase2.md)
 
 ## Requirements
 
@@ -61,7 +66,23 @@ sudo apt install -y gcc-riscv64-linux-gnu qemu-system-misc python3
 
 QEMU forwards host port `20080` to guest port `80` (`hostfwd=tcp::20080-:80`).
 
-### 1. Start the HTTP server
+### 1. Configure Packet Loss Rate (xv6 shell)
+
+The in-driver loss rate can be inspected and updated at runtime:
+
+```sh
+$ setloss
+Current E1000 packet loss rate: 10%
+Usage: setloss <rate_percent (0-100)>
+
+$ setloss 0
+E1000 packet loss rate set to 0%
+
+$ setloss 10
+E1000 packet loss rate set to 10%
+```
+
+### 2. Start the HTTP server
 
 Inside the xv6 shell:
 ```sh
@@ -69,14 +90,14 @@ $ httpd
 Starting xv6 httpd server (HTTP/1.0) on port 80...
 ```
 
-### 2. Basic HTTP GET (Host)
+### 3. Basic HTTP GET (Host)
 
 From the Linux host terminal:
 ```bash
 curl -v http://127.0.0.1:20080/README
 ```
 
-### 3. 1 MB Transfer Test with 10% Packet Loss
+### 4. 1 MB Transfer Test with 10% Packet Loss
 
 The server exposes `/file1mb` which serves a deterministic 1,048,576-byte stream generated by `(i * 37 + 13) & 0xff`. Even with 10% packet drops enabled in the E1000 driver, TCP retransmissions ensure reliable delivery.
 
@@ -92,12 +113,12 @@ sha256sum downloaded_1mb.bin expected_1mb.bin
 ```
 
 Expected output:
-```
+```text
 c4e1ab33a4d2f0d7be4e6be6c387096da51a28bad003f71309bb774f75139111  downloaded_1mb.bin
 c4e1ab33a4d2f0d7be4e6be6c387096da51a28bad003f71309bb774f75139111  expected_1mb.bin
 ```
 
-### 4. Regression Tests
+### 5. Regression Tests
 
 Run original xv6 system call tests to verify kernel stability:
 ```bash

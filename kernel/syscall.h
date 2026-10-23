@@ -26,3 +26,5 @@
 #define SYS_listen  25
 #define SYS_accept  26
 #define SYS_connect 27
+#define SYS_set_loss_rate 28
+#define SYS_get_loss_rate 29

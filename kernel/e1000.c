@@ -23,13 +23,37 @@ static struct mbuf *rx_mbufs[RX_RING_SIZE];
 // mac cua card e1000 trong qemu
 uint8 local_mac[ETH_ADDR_LEN] = {0x52, 0x54, 0x00, 0x12, 0x34, 0x56};
 
-// gia lap rot goi 10% bang lcg de test tcp retransmit
+// gia lap rot goi co the cau hinh qua syscall de test tcp retransmit
 static uint32 packet_loss_seed = 12345;
-static int
-should_drop_packet_10pct(void)
+static int packet_loss_rate = 10; // mac dinh 10%
+
+int
+e1000_set_loss_rate(int rate)
 {
+  if (rate < 0) rate = 0;
+  if (rate > 100) rate = 100;
+  acquire(&e1000_lock);
+  packet_loss_rate = rate;
+  release(&e1000_lock);
+  return packet_loss_rate;
+}
+
+int
+e1000_get_loss_rate(void)
+{
+  acquire(&e1000_lock);
+  int r = packet_loss_rate;
+  release(&e1000_lock);
+  return r;
+}
+
+static int
+should_drop_packet(void)
+{
+  if (packet_loss_rate <= 0)
+    return 0;
   packet_loss_seed = (packet_loss_seed * 1103515245 + 12345) & 0x7fffffff;
-  return (packet_loss_seed % 100) < 10;
+  return (packet_loss_seed % 100) < packet_loss_rate;
 }
 
 // khoi tao dma ring tx va rx
@@ -113,7 +137,7 @@ e1000_transmit(struct mbuf *m)
   if (m->len >= 14)
     eth_type = ntohs(*(uint16 *)(m->head + 12));
 
-  if (eth_type != ETH_TYPE_ARP && should_drop_packet_10pct()) {
+  if (eth_type != ETH_TYPE_ARP && should_drop_packet()) {
     release(&e1000_lock);
     mbuffree(m);
     return 0; // drop goi de test retransmit

@@ -108,6 +108,8 @@ extern uint64 sys_bind(void);
 extern uint64 sys_listen(void);
 extern uint64 sys_accept(void);
 extern uint64 sys_connect(void);
+extern uint64 sys_set_loss_rate(void);
+extern uint64 sys_get_loss_rate(void);
 
 // An array mapping syscall numbers from syscall.h
 // to the function that handles the system call.
@@ -140,6 +142,8 @@ static uint64 (*syscalls[])(void) = {
   [SYS_listen]  = sys_listen,
   [SYS_accept]  = sys_accept,
   [SYS_connect] = sys_connect,
+  [SYS_set_loss_rate] = sys_set_loss_rate,
+  [SYS_get_loss_rate] = sys_get_loss_rate,
   // clang-format on
 };
 

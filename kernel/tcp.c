@@ -205,10 +205,13 @@ tcp_timer_process(void)
       pcb->rto = pcb->rto * 2;
       if (pcb->rto > 2000)
         pcb->rto = 2000;
-      pcb->rto_deadline = ticks + (pcb->rto / 10 ? pcb->rto / 10 : 1);
+      pcb->rto_deadline = ticks + (pcb->rto / 100 ? pcb->rto / 100 : 1);
 
       if (pcb->backoff > 12) {
         pcb->state = TCP_CLOSED;
+        wakeup(pcb);
+        if (pcb->sock)
+          sock_push_eof((struct socket *)pcb->sock);
         release(&pcb->lock);
         continue;
       }

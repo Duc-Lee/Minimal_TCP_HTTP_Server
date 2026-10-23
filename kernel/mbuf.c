@@ -42,9 +42,37 @@ mbufalloc(unsigned int headroom)
     mbuf_pool.free_list = m->next;
     m->next = 0;
     m->ref_cnt = 1;
+    m->seq_end = 0;
     m->head = m->buf + headroom;
     m->len = 0;
   }
+  release(&mbuf_pool.lock);
+
+  return m;
+}
+
+// cap phat mbuf cho process context, neu tam thoi het thi sleep cho giai phong
+struct mbuf*
+mbufalloc_wait(unsigned int headroom)
+{
+  struct mbuf *m;
+
+  if (headroom > MBUF_SIZE)
+    return 0;
+
+  acquire(&mbuf_pool.lock);
+  while ((m = mbuf_pool.free_list) == 0) {
+    sleep_prepare(&mbuf_pool);
+    release(&mbuf_pool.lock);
+    sleep();
+    acquire(&mbuf_pool.lock);
+  }
+  mbuf_pool.free_list = m->next;
+  m->next = 0;
+  m->ref_cnt = 1;
+  m->seq_end = 0;
+  m->head = m->buf + headroom;
+  m->len = 0;
   release(&mbuf_pool.lock);
 
   return m;
@@ -63,6 +91,7 @@ mbuffree(struct mbuf *m)
     m->ref_cnt = 0;
     m->next = mbuf_pool.free_list;
     mbuf_pool.free_list = m;
+    wakeup(&mbuf_pool); // danh thuc tien trinh dang cho mbuf
   }
   release(&mbuf_pool.lock);
 }

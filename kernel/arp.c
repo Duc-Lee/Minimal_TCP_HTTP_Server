@@ -202,6 +202,10 @@ arp_resolve(uint32 ip, uint8 *mac_out, struct mbuf *pending_m)
       arp_cache.entries[slot].valid = 0; // chua co mac, cho reply
       pending_m->next = arp_cache.entries[slot].pending_queue;
       arp_cache.entries[slot].pending_queue = pending_m;
+    } else {
+      release(&arp_cache.lock);
+      mbuffree(pending_m);
+      return -1;
     }
     release(&arp_cache.lock);
     // broadcast arp request

@@ -10,10 +10,10 @@
 
 #define RTO_MIN        200    // rto toi thieu 200ms
 #define RTO_MAX        2000   // rto toi da 2s de tranh doi qua lau
-#define TICKS_PER_SEC  100    // timer xv6 chay o 100hz
+#define TICKS_PER_SEC  10     // timer xv6 chay o 10hz (1000000 cycles o 10MHz = 100ms)
 
-#define TICKS_TO_MS(t)  ((t) * (1000 / TICKS_PER_SEC))
-#define MS_TO_TICKS(ms) (((ms) + (1000/TICKS_PER_SEC) - 1) / (1000/TICKS_PER_SEC))
+#define TICKS_TO_MS(t)  ((t) * 100)
+#define MS_TO_TICKS(ms) (((ms) + 99) / 100)
 
 // tinh rto dong theo thuat toan jacobson/karels (rfc 6298)
 // dung fixed-point: srtt nhan 8, rttvar nhan 4 de tranh dung so thuc

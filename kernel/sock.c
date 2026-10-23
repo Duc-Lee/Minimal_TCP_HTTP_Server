@@ -215,15 +215,9 @@ sock_write(struct socket *s, uint64 addr, int n)
     if (chunk > 1400)
       chunk = 1400;
 
-    struct mbuf *m = mbufalloc(MBUF_DEFAULT_HEAD);
-    if (!m) {
-      // het mbuf thi doi timer hoac ack giai phong bot
-      acquire(&pcb->lock);
-      sleep_prepare(pcb);
-      release(&pcb->lock);
-      sleep();
-      continue;
-    }
+    struct mbuf *m = mbufalloc_wait(MBUF_DEFAULT_HEAD);
+    if (!m)
+      break;
 
     char *dst = mbufput(m, chunk);
     if (!dst) {

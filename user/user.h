@@ -35,6 +35,8 @@ int bind(int sockfd, int ip, int port);
 int listen(int sockfd, int backlog);
 int accept(int sockfd);
 int connect(int sockfd, int ip, int port);
+int set_loss_rate(int rate);
+int get_loss_rate(void);
 
 #define AF_INET     2
 #define SOCK_STREAM 1

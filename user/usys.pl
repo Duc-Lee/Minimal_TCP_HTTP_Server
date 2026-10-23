@@ -48,3 +48,5 @@ entry("bind");
 entry("listen");
 entry("accept");
 entry("connect");
+entry("set_loss_rate");
+entry("get_loss_rate");

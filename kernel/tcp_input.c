@@ -30,7 +30,7 @@ tcp_handle_ack(struct tcp_pcb *pcb, uint32 ack, uint16 win)
     // giai phong segment da duoc ack
     struct mbuf **pq = &pcb->retransmit_q;
     while (*pq) {
-      uint32 seg_end = *(uint32 *)((*pq)->buf);
+      uint32 seg_end = (*pq)->seq_end;
       if ((int32)(ack - seg_end) >= 0) {
         struct mbuf *done = *pq;
         *pq = done->next;
@@ -45,7 +45,7 @@ tcp_handle_ack(struct tcp_pcb *pcb, uint32 ack, uint16 win)
     pcb->backoff  = 0;
     pcb->rto      = 200; // reset ve baseline rto
     if (pcb->retransmit_q) {
-      uint32 t = pcb->rto / 10;
+      uint32 t = pcb->rto / 100;
       pcb->rto_deadline = ticks + (t ? t : 1);
     } else {
       pcb->rto_deadline = 0;
@@ -66,7 +66,7 @@ tcp_handle_ack(struct tcp_pcb *pcb, uint32 ack, uint16 win)
           mbuffree(copy);
         }
       }
-      uint32 t = pcb->rto / 10;
+      uint32 t = pcb->rto / 100;
       pcb->rto_deadline = ticks + (t ? t : 1);
     }
   }
@@ -113,6 +113,19 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
   }
 
   acquire(&pcb->lock);
+
+  // xu ly co RST: client huy hoac dong ket noi dot ngot
+  if (flags & TCP_FLAG_RST) {
+    if (pcb->state != TCP_LISTEN && pcb->state != TCP_CLOSED) {
+      pcb->state = TCP_CLOSED;
+      wakeup(pcb);
+      if (pcb->sock)
+        sock_push_eof((struct socket *)pcb->sock);
+    }
+    release(&pcb->lock);
+    mbuffree(m);
+    return;
+  }
 
   switch (pcb->state) {
 

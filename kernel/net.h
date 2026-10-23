@@ -99,11 +99,13 @@ struct mbuf {
   char        *head;           // con tro tro vao dau goi
   unsigned int len;            // do dai data
   int          ref_cnt;        // dem tham chieu
+  uint32       seq_end;        // metadata: sequence ket thuc cua segment
   char         buf[MBUF_SIZE]; // vung dem chua du lieu
 };
 
 // api mbuf (kernel/mbuf.c)
 struct mbuf* mbufalloc(unsigned int headroom);
+struct mbuf* mbufalloc_wait(unsigned int headroom);
 void         mbuffree(struct mbuf *m);
 char*        mbufpush(struct mbuf *m, unsigned int len);
 char*        mbufpull(struct mbuf *m, unsigned int len);
@@ -117,6 +119,8 @@ void         e1000_init(uint32 *regs);
 int          e1000_transmit(struct mbuf *m);
 void         e1000_recv(void);
 void         e1000_intr(void);
+int          e1000_set_loss_rate(int rate);
+int          e1000_get_loss_rate(void);
 
 // ethernet l2 (kernel/eth.c)
 void         eth_init(uint8 *mac_addr);

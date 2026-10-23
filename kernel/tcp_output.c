@@ -8,7 +8,6 @@
 #include "net.h"
 
 // clone mbuf de giu lai trong queue truyen lai phong khi mat goi
-// nhet luon seq_end vao dau buf lam metadata
 static struct mbuf*
 mbuf_clone_for_retransmit(struct mbuf *m, uint32 seq_end)
 {
@@ -23,7 +22,7 @@ mbuf_clone_for_retransmit(struct mbuf *m, uint32 seq_end)
   }
   memmove(dst, m->head, m->len);
 
-  *(uint32 *)(clone->buf) = seq_end;
+  clone->seq_end = seq_end;
   return clone;
 }
 
@@ -82,7 +81,7 @@ tcp_output(struct tcp_pcb *pcb, struct mbuf *m, uint8 flags)
       *tail = clone;
 
       if (pcb->rto_deadline == 0)
-        pcb->rto_deadline = ticks + pcb->rto / (1000 / 100);
+        pcb->rto_deadline = ticks + (pcb->rto / 100 ? pcb->rto / 100 : 1);
       release(&pcb->lock);
     }
   }
