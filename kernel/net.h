@@ -97,8 +97,6 @@ struct tcphdr {
 
 // bo dem goi tin mbuf
 struct mbuf {
-// bo dem goi tin mbuf
-struct mbuf {
   struct mbuf *next;           // moc noi vao queue
   char        *head;           // con tro tro vao dau goi
   unsigned int len;            // do dai data
