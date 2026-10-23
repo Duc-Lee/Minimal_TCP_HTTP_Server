@@ -78,12 +78,12 @@ e1000_init(uint32 *e1000_regs)
   regs[E1000_TDBAL / 4] = tx_phys & 0xffffffff;
   regs[E1000_TDBAH / 4] = (tx_phys >> 32) & 0xffffffff;
   regs[E1000_TDLEN / 4] = TX_RING_SIZE * sizeof(struct tx_desc);
-  regs[E1000_TDH / 4]   = 0;
-  regs[E1000_TDT / 4]   = 0;
+  regs[E1000_TDH / 4] = 0;
+  regs[E1000_TDT / 4] = 0;
 
   // bat transmit: en | psp | ct=0x10 | cold=0x40
-  regs[E1000_TCTL / 4] = E1000_TCTL_EN | E1000_TCTL_PSP |
-                          (0x10 << 4) | (0x40 << 12);
+  regs[E1000_TCTL / 4] =
+    E1000_TCTL_EN | E1000_TCTL_PSP | (0x10 << 4) | (0x40 << 12);
   // tipg: inter-packet gap theo ieee 802.3
   regs[E1000_TIPG / 4] = 10 | (8 << 10) | (6 << 20);
 
@@ -92,15 +92,15 @@ e1000_init(uint32 *e1000_regs)
     rx_mbufs[i] = mbufalloc(0);
     if (!rx_mbufs[i])
       panic("e1000_init: mbufalloc failed");
-    rx_ring[i].addr   = (uint64)rx_mbufs[i]->head;
+    rx_ring[i].addr = (uint64)rx_mbufs[i]->head;
     rx_ring[i].status = 0;
   }
 
   // nap dia chi mac vao thanh ghi ra[0]
-  uint32 mac_lo = local_mac[0] | (local_mac[1] << 8) |
-                  (local_mac[2] << 16) | (local_mac[3] << 24);
+  uint32 mac_lo = local_mac[0] | (local_mac[1] << 8) | (local_mac[2] << 16) |
+                  (local_mac[3] << 24);
   uint32 mac_hi = local_mac[4] | (local_mac[5] << 8) | (1u << 31);
-  regs[E1000_RA / 4]       = mac_lo;
+  regs[E1000_RA / 4] = mac_lo;
   regs[(E1000_RA + 4) / 4] = mac_hi;
 
   // clear bang multicast
@@ -111,12 +111,12 @@ e1000_init(uint32 *e1000_regs)
   regs[E1000_RDBAL / 4] = rx_phys & 0xffffffff;
   regs[E1000_RDBAH / 4] = (rx_phys >> 32) & 0xffffffff;
   regs[E1000_RDLEN / 4] = RX_RING_SIZE * sizeof(struct rx_desc);
-  regs[E1000_RDH / 4]   = 0;
-  regs[E1000_RDT / 4]   = RX_RING_SIZE - 1;
+  regs[E1000_RDH / 4] = 0;
+  regs[E1000_RDT / 4] = RX_RING_SIZE - 1;
 
   // bat receive: cho phep nhan broadcast
-  regs[E1000_RCTL / 4] = E1000_RCTL_EN | E1000_RCTL_BAM |
-                          E1000_RCTL_SZ_2048 | E1000_RCTL_SECRC;
+  regs[E1000_RCTL / 4] =
+    E1000_RCTL_EN | E1000_RCTL_BAM | E1000_RCTL_SZ_2048 | E1000_RCTL_SECRC;
 
   // bat ngat rxt0
   regs[E1000_IMS / 4] = E1000_ICR_RXT0;
@@ -158,9 +158,9 @@ e1000_transmit(struct mbuf *m)
     tx_mbufs[tdt % TX_RING_SIZE] = 0;
   }
 
-  d->addr   = (uint64)m->head;
+  d->addr = (uint64)m->head;
   d->length = m->len;
-  d->cmd    = E1000_TXD_CMD_EOP | E1000_TXD_CMD_IFCS | E1000_TXD_CMD_RS;
+  d->cmd = E1000_TXD_CMD_EOP | E1000_TXD_CMD_IFCS | E1000_TXD_CMD_RS;
   d->status = 0;
   tx_mbufs[tdt % TX_RING_SIZE] = m;
 
@@ -188,9 +188,9 @@ e1000_recv(void)
     // cap mbuf moi bu vao slot
     struct mbuf *newm = mbufalloc(0);
     if (newm) {
-      rx_ring[next].addr   = (uint64)newm->head;
+      rx_ring[next].addr = (uint64)newm->head;
       rx_ring[next].status = 0;
-      rx_mbufs[next]       = newm;
+      rx_mbufs[next] = newm;
     } else {
       rx_ring[next].status = 0;
       regs[E1000_RDT / 4] = next;

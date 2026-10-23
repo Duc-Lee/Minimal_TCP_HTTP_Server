@@ -10,8 +10,8 @@
 
 struct arp_entry {
   uint32 ip;
-  uint8  mac[ETH_ADDR_LEN];
-  int    valid;
+  uint8 mac[ETH_ADDR_LEN];
+  int valid;
   struct mbuf *pending_queue; // giu goi cho phan giai mac
 };
 
@@ -20,7 +20,7 @@ static struct {
   struct arp_entry entries[ARP_TABLE_SIZE];
 } arp_cache;
 
-extern uint8  local_mac[ETH_ADDR_LEN];
+extern uint8 local_mac[ETH_ADDR_LEN];
 extern uint32 local_ip;
 
 void
@@ -49,15 +49,15 @@ arp_send_reply(uint32 target_ip, uint8 *target_mac)
     return;
   }
 
-  arphdr->hrd = htons(1);              // Ethernet
-  arphdr->pro = htons(ETH_TYPE_IP);   // IPv4
+  arphdr->hrd = htons(1);           // Ethernet
+  arphdr->pro = htons(ETH_TYPE_IP); // IPv4
   arphdr->hln = ETH_ADDR_LEN;
   arphdr->pln = 4;
-  arphdr->op  = htons(ARP_OP_REPLY);
+  arphdr->op = htons(ARP_OP_REPLY);
 
   for (int i = 0; i < ETH_ADDR_LEN; i++) {
-    arphdr->sha[i] = local_mac[i];    // sender = xv6
-    arphdr->tha[i] = target_mac[i];   // target mac cua client
+    arphdr->sha[i] = local_mac[i];  // sender = xv6
+    arphdr->tha[i] = target_mac[i]; // target mac cua client
   }
   arphdr->sip = htonl(local_ip);
   arphdr->tip = htonl(target_ip);
@@ -80,14 +80,15 @@ arp_send_request(uint32 target_ip)
     return;
   }
 
-  static uint8 broadcast_mac[ETH_ADDR_LEN] = {0xff,0xff,0xff,0xff,0xff,0xff};
-  static uint8 zero_mac[ETH_ADDR_LEN]      = {0};
+  static uint8 broadcast_mac[ETH_ADDR_LEN] = {0xff, 0xff, 0xff,
+                                              0xff, 0xff, 0xff};
+  static uint8 zero_mac[ETH_ADDR_LEN] = {0};
 
   arphdr->hrd = htons(1);
   arphdr->pro = htons(ETH_TYPE_IP);
   arphdr->hln = ETH_ADDR_LEN;
   arphdr->pln = 4;
-  arphdr->op  = htons(ARP_OP_REQUEST);
+  arphdr->op = htons(ARP_OP_REQUEST);
 
   for (int i = 0; i < ETH_ADDR_LEN; i++) {
     arphdr->sha[i] = local_mac[i];
@@ -114,14 +115,14 @@ arp_input(struct mbuf *m)
 
   uint16 hrd = ntohs(arphdr->hrd);
   uint16 pro = ntohs(arphdr->pro);
-  uint16 op  = ntohs(arphdr->op);
+  uint16 op = ntohs(arphdr->op);
 
   if (hrd != 1 || pro != ETH_TYPE_IP) {
     mbuffree(m);
     return;
   }
 
-  uint32 sip   = ntohl(arphdr->sip);
+  uint32 sip = ntohl(arphdr->sip);
 
   acquire(&arp_cache.lock);
 
@@ -198,7 +199,7 @@ arp_resolve(uint32 ip, uint8 *mac_out, struct mbuf *pending_m)
       }
     }
     if (slot >= 0) {
-      arp_cache.entries[slot].ip    = ip;
+      arp_cache.entries[slot].ip = ip;
       arp_cache.entries[slot].valid = 0; // chua co mac, cho reply
       pending_m->next = arp_cache.entries[slot].pending_queue;
       arp_cache.entries[slot].pending_queue = pending_m;

@@ -8,7 +8,7 @@
 #include "net.h"
 
 // clone mbuf de giu lai trong queue truyen lai phong khi mat goi
-static struct mbuf*
+static struct mbuf *
 mbuf_clone_for_retransmit(struct mbuf *m, uint32 seq_end)
 {
   struct mbuf *clone = mbufalloc(MBUF_DEFAULT_HEAD);
@@ -49,19 +49,19 @@ tcp_output(struct tcp_pcb *pcb, struct mbuf *m, uint8 flags)
 
   th->sport = htons(pcb->local_port);
   th->dport = htons(pcb->remote_port);
-  th->seq   = htonl(pcb->snd_nxt);
-  th->ack   = htonl(pcb->rcv_nxt);
-  th->off   = (sizeof(struct tcphdr) / 4) << 4;
+  th->seq = htonl(pcb->snd_nxt);
+  th->ack = htonl(pcb->rcv_nxt);
+  th->off = (sizeof(struct tcphdr) / 4) << 4;
   th->flags = flags;
-  th->win   = htons(pcb->rcv_wnd);
-  th->urp   = 0;
+  th->win = htons(pcb->rcv_wnd);
+  th->urp = 0;
   th->cksum = 0;
 
   // checksum tcp voi pseudo header
   th->cksum = tcp_checksum(m, pcb->local_ip, pcb->remote_ip);
 
   uint32 seq_start = pcb->snd_nxt;
-  uint32 seq_end   = seq_start;
+  uint32 seq_end = seq_start;
 
   if (flags & (TCP_FLAG_SYN | TCP_FLAG_FIN))
     seq_end++;

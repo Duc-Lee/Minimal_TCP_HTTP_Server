@@ -40,10 +40,10 @@ tcp_handle_ack(struct tcp_pcb *pcb, uint32 ack, uint16 win)
         pq = &(*pq)->next;
       }
     }
-    pcb->snd_una  = ack;
+    pcb->snd_una = ack;
     pcb->dup_acks = 0;
-    pcb->backoff  = 0;
-    pcb->rto      = 200; // reset ve baseline rto
+    pcb->backoff = 0;
+    pcb->rto = 200; // reset ve baseline rto
     if (pcb->retransmit_q) {
       uint32 t = pcb->rto / 100;
       pcb->rto_deadline = ticks + (t ? t : 1);
@@ -93,10 +93,10 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
   }
   uint16 sport = ntohs(th->sport);
   uint16 dport = ntohs(th->dport);
-  uint32 seq   = ntohl(th->seq);
-  uint32 ack   = ntohl(th->ack);
-  uint8  flags = th->flags;
-  uint16 win   = ntohs(th->win);
+  uint32 seq = ntohl(th->seq);
+  uint32 ack = ntohl(th->ack);
+  uint8 flags = th->flags;
+  uint16 win = ntohs(th->win);
 
   int hlen = (th->off >> 4) * 4;
   if (hlen < (int)sizeof(struct tcphdr)) {
@@ -138,15 +138,15 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
         mbuffree(m);
         return;
       }
-      newpcb->local_ip   = dst_ip;
+      newpcb->local_ip = dst_ip;
       newpcb->local_port = dport;
-      newpcb->remote_ip  = src_ip;
+      newpcb->remote_ip = src_ip;
       newpcb->remote_port = sport;
-      newpcb->irs        = seq;
-      newpcb->rcv_nxt    = seq + 1;
-      newpcb->rcv_wnd    = 4096;
-      newpcb->state      = TCP_SYN_RCVD;
-      newpcb->sock       = pcb->sock;
+      newpcb->irs = seq;
+      newpcb->rcv_nxt = seq + 1;
+      newpcb->rcv_wnd = 4096;
+      newpcb->state = TCP_SYN_RCVD;
+      newpcb->sock = pcb->sock;
 
       tcp_pcb_insert(newpcb);
 
@@ -161,11 +161,11 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
 
   case TCP_SYN_SENT:
     if ((flags & TCP_FLAG_SYN) && (flags & TCP_FLAG_ACK)) {
-      pcb->irs      = seq;
-      pcb->rcv_nxt  = seq + 1;
-      pcb->snd_una  = ack;
-      pcb->snd_wnd  = win;
-      pcb->state    = TCP_ESTABLISHED;
+      pcb->irs = seq;
+      pcb->rcv_nxt = seq + 1;
+      pcb->snd_una = ack;
+      pcb->snd_wnd = win;
+      pcb->state = TCP_ESTABLISHED;
       release(&pcb->lock);
       mbuffree(m);
       // gui ack buoc 3
@@ -185,7 +185,7 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
     if (flags & TCP_FLAG_ACK) {
       pcb->snd_una = ack;
       pcb->snd_wnd = win;
-      pcb->state   = TCP_ESTABLISHED;
+      pcb->state = TCP_ESTABLISHED;
 
       // day vao backlog cua socket listen de accept lay ra
       struct socket *ls = (struct socket *)pcb->sock;
@@ -194,8 +194,8 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
         if (ls->backlog_cnt < ls->backlog_max) {
           struct socket *newsock = sock_alloc_for_pcb(pcb);
           if (newsock) {
-            newsock->next  = ls->backlog_q;
-            ls->backlog_q  = newsock;
+            newsock->next = ls->backlog_q;
+            ls->backlog_q = newsock;
             ls->backlog_cnt++;
             pcb->sock = newsock;
           }

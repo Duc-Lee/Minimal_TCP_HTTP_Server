@@ -35,7 +35,7 @@ sock_init(void)
 }
 
 // lay socket trong tu bang
-struct socket*
+struct socket *
 sock_alloc(void)
 {
   struct socket *s = 0;
@@ -62,7 +62,7 @@ sock_alloc(void)
 }
 
 // cap phat socket struct cho pcb moi tao khi accept
-struct socket*
+struct socket *
 sock_alloc_for_pcb(struct tcp_pcb *pcb)
 {
   struct socket *s = 0;
@@ -186,7 +186,8 @@ sock_write(struct socket *s, uint64 addr, int n)
 {
   int total_written = 0;
 
-  if (!s || !s->pcb || (s->pcb->state != TCP_ESTABLISHED && s->pcb->state != TCP_CLOSE_WAIT))
+  if (!s || !s->pcb ||
+      (s->pcb->state != TCP_ESTABLISHED && s->pcb->state != TCP_CLOSE_WAIT))
     return -1;
 
   struct tcp_pcb *pcb = s->pcb;
@@ -270,7 +271,7 @@ sock_listen(struct socket *s, int backlog)
 }
 
 // lay ket noi tu hang doi backlog
-struct socket*
+struct socket *
 sock_accept(struct socket *s)
 {
   struct socket *newsock = 0;
