@@ -34,8 +34,17 @@ user/
 doc/
 ├── phase1.md              # Phase 1 Core Deliverables Report
 └── phase2.md              # Phase 2 Kernel Hardening, Deadlock Fix & RTO Calibration Report
+plans/
+├── README.md              # Kế hoạch tổng thể 6 tuần & Ma trận phân công (33%-33%-33%)
+├── members/               # Kế hoạch chi tiết 6 tuần từng thành viên (TV1, TV2, TV3)
+└── weeks/                 # Kế hoạch phối hợp từng tuần (Tuần 1 đến Tuần 6)
 ```
 
+- **Kế hoạch 6 tuần & Phân công nhiệm vụ chi tiết:** [plans/README.md](plans/README.md)
+  - [Thành viên 1 (Hạ tầng mạng, mbuf, loss simulator & RTO)](plans/members/member_1_tv1.md)
+  - [Thành viên 2 (Tầng giao vận TCP, Out-of-Order & Tắc nghẽn Reno/BBR)](plans/members/member_2_tv2.md)
+  - [Thành viên 3 (Hệ thống tệp 1MB, Socket VFS, Multi-worker HTTP & Trực quan hóa)](plans/members/member_3_tv3.md)
+  - Lộ trình từng tuần: [Tuần 1](plans/weeks/week_1.md) | [Tuần 2](plans/weeks/week_2.md) | [Tuần 3](plans/weeks/week_3.md) | [Tuần 4](plans/weeks/week_4.md) | [Tuần 5](plans/weeks/week_5.md) | [Tuần 6](plans/weeks/week_6.md)
 - Phase 1 Architecture Breakdown: [doc/phase1.md](doc/phase1.md)
 - Phase 2 Implementation & Troubleshooting Report: [doc/phase2.md](doc/phase2.md)
 
