@@ -3,9 +3,9 @@
 
 ---
 
-## 1. Thông Tin Thành Viên & Trách Nhiệm
+## 1. Thông Tin Thành Viên & Phạm Vi Kỹ Thuật
 
-* **Vai trò:** Kỹ sư Hạ tầng Mạng, Driver & Quản lý Bộ nhớ (*Network Infrastructure, NIC Driver & Memory Safety Engineer*).
+* **Định hướng kỹ thuật chính:** Hạ Tầng Mạng, Bộ Đệm Mbuf, Driver E1000 & RTO Timer (phối hợp linh hoạt cùng nhóm).
 * **Tỷ trọng đóng góp:** 33.3% khối lượng toàn bộ dự án.
 * **Danh mục mã nguồn phụ trách chính:**
   * `kernel/mbuf.c`: Quản lý cấp phát, thu hồi và đồng bộ hóa hàng đợi bộ đệm `mbuf`.

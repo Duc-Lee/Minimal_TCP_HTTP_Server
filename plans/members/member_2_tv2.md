@@ -3,9 +3,9 @@
 
 ---
 
-## 1. Thông Tin Thành Viên & Trách Nhiệm
+## 1. Thông Tin Thành Viên & Phạm Vi Kỹ Thuật
 
-* **Vai trò:** Kỹ sư Tầng Giao vận TCP & Kiểm soát Tắc nghẽn (*TCP Transport Layer, State Machine & Congestion Control Engineer*).
+* **Định hướng kỹ thuật chính:** Tầng Giao Vận TCP, Máy Trạng Thái FSM & Kiểm Soát Tắc Nghẽn (phối hợp linh hoạt cùng nhóm).
 * **Tỷ trọng đóng góp:** 33.3% khối lượng toàn bộ dự án.
 * **Danh mục mã nguồn phụ trách chính:**
   * `kernel/tcp.c`: Quản lý danh sách bảng PCB (Protocol Control Block), cấp phát, tìm kiếm, khởi tạo và hủy kết nối.

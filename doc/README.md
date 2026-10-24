@@ -6,14 +6,13 @@ Thư mục này ghi nhận tiến trình thực hiện thực tế qua từng tu
 
 ---
 
-## Danh Sách Thành Viên & Phân Nhiệm
+## Danh Sách Thành Viên
 
 1. **Phùng Huy Hoàng - MSSV: 20233414**
-   - **Vai trò:** Thành viên 1 (TV1) - Kỹ sư Hạ tầng Mạng, Driver E1000 & Quản lý Bộ nhớ Mbuf.
 2. **Nguyễn Vũ Hiệp - MSSV: 20233392**
-   - **Vai trò:** Thành viên 2 (TV2) - Kỹ sư Tầng Giao vận TCP, Máy trạng thái FSM & Thuật toán Tắc nghẽn.
 3. **Lê Anh Đức - MSSV: 20233324**
-   - **Vai trò:** Thành viên 3 (TV3) - Kỹ sư Tầng Ứng dụng, BSD Socket VFS, HTTP Server & Trực quan hóa.
+
+*(Các thành viên trong nhóm phối hợp làm việc linh hoạt theo tiến trình thực tế)*
 
 ---
 

@@ -49,9 +49,9 @@ Mục tiêu của dự án là xây dựng một **ngăn xếp mạng TCP/IP t�
 
 ---
 
-## 2. Ma Trận Phân Công Trách Nhiệm (33% – 33% – 33%)
+## 2. Phân Chia Các Nhóm Module Kỹ Thuật (Tham Khảo Linh Hoạt)
 
-Dự án được phân chia đồng đều và độc lập cao giữa 3 thành viên theo từng tầng trong mô hình mạng:
+Dự án được phân chia thành 3 nhóm module kỹ thuật để các thành viên phối hợp triển khai linh hoạt:
 
 | Thành viên | Tầng phụ trách chính | Danh mục mã nguồn sở hữu | Trách nhiệm chuyên môn cốt lõi |
 | :--- | :--- | :--- | :--- |

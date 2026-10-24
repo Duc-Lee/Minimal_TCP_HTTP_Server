@@ -3,9 +3,9 @@
 
 ---
 
-## 1. Thông Tin Thành Viên & Trách Nhiệm
+## 1. Thông Tin Thành Viên & Phạm Vi Kỹ Thuật
 
-* **Vai trò:** Kỹ sư Tầng Ứng dụng, Hệ thống Tệp, Socket VFS & Trực quan hóa (*Application Layer, File System, VFS Socket & Observability Engineer*).
+* **Định hướng kỹ thuật chính:** Tầng Ứng Dụng, Hệ Thống Tệp 1 MB Thật, Web Server & Trực Quan Hóa (phối hợp linh hoạt cùng nhóm).
 * **Tỷ trọng đóng góp:** 33.3% khối lượng toàn bộ dự án.
 * **Danh mục mã nguồn phụ trách chính:**
   * `kernel/fs.c`, `kernel/fs.h`, `mkfs/mkfs.c`: Nâng cấp cấu trúc hệ thống tệp đĩa xv6 (Doubly-Indirect Block) để chứa file 1 MB thật.

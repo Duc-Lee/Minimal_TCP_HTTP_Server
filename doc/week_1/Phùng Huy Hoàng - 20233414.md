@@ -3,7 +3,6 @@
 
 * **Người thực hiện:** Phùng Huy Hoàng - MSSV: 20233414
 * **Tuần:** Tuần 1 (Week 1)
-* **Vai trò:** Thành viên 1 (TV1) - Hạ tầng Mạng, Quản lý Bộ nhớ Mbuf & Driver E1000
 * **Repository:** Minimal_TCP_HTTP_Server (xv6-riscv 64-bit)
 
 ---
