@@ -168,8 +168,11 @@ UPROGS=\
 	$U/_httpd\
 	$U/_setloss\
 
-fs.img: mkfs/mkfs README $(UPROGS)
-	mkfs/mkfs fs.img README $(UPROGS)
+fs.img: mkfs/mkfs README $(UPROGS) user/largefile.bin
+	mkfs/mkfs fs.img README $(UPROGS) user/largefile.bin
+
+user/largefile.bin:
+	dd if=/dev/urandom of=user/largefile.bin bs=1024 count=1024
 
 -include kernel/*.d user/*.d
 
@@ -179,7 +182,8 @@ clean:
 	$K/kernel fs.img \
 	mkfs/mkfs .gdbinit \
         $U/usys.S \
-	$(UPROGS)
+	$(UPROGS) \
+	user/largefile.bin
 
 # try to generate a unique GDB port
 GDBPORT = $(shell expr `id -u` % 5000 + 25000)

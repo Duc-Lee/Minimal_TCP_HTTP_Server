@@ -49,30 +49,6 @@ handle_http_client(int client_fd)
   // mo file tren he thong file
   int file_fd = open(path, O_RDONLY);
   if (file_fd < 0) {
-    if (strcmp(path, "file1mb") == 0 || strcmp(path, "1mb.bin") == 0) {
-      // test truyen file 1mb sinh du lieu mau
-      const char *hdr =
-        "HTTP/1.0 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: 1048576\r\n\r\n";
-      write(client_fd, hdr, strlen(hdr));
-
-      char gen_buf[BUF_SIZE];
-      for (int b = 0; b < BUF_SIZE; b++) {
-        gen_buf[b] = (char)((b * 37 + 13) & 0xff);
-      }
-      for (int k = 0; k < 1024; k++) {
-        int sent = 0;
-        while (sent < BUF_SIZE) {
-          int w = write(client_fd, gen_buf + sent, BUF_SIZE - sent);
-          if (w <= 0)
-            break;
-          sent += w;
-        }
-        if (sent < BUF_SIZE)
-          break;
-      }
-      close(client_fd);
-      return;
-    }
     const char *not_found =
       "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\n404 Not Found";
     write(client_fd, not_found, strlen(not_found));
