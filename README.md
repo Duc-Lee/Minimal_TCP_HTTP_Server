@@ -32,21 +32,22 @@ user/
 ├── setloss.c              # Command-line utility to configure packet loss rate (0% - 100%)
 └── user.h                 # User-space syscall prototypes
 doc/
-├── phase1.md              # Phase 1 Core Deliverables Report
-└── phase2.md              # Phase 2 Kernel Hardening, Deadlock Fix & RTO Calibration Report
+├── README.md              # Mục lục tiến trình thực hiện của 3 thành viên theo tuần
+└── week_1/ .. week_6/     # Báo cáo tiến trình chi tiết của 3 thành viên theo từng tuần
 plans/
 ├── README.md              # Kế hoạch tổng thể 6 tuần & Ma trận phân công (33%-33%-33%)
 ├── members/               # Kế hoạch chi tiết 6 tuần từng thành viên (TV1, TV2, TV3)
 └── weeks/                 # Kế hoạch phối hợp từng tuần (Tuần 1 đến Tuần 6)
 ```
 
+- **Báo cáo tiến trình từng thành viên theo tuần:** [doc/README.md](doc/README.md)
+  - [Tuần 1](doc/week_1): [Phùng Huy Hoàng](doc/week_1/Phùng%20Huy%20Hoàng%20-%2020233414.md) (Giai đoạn 2) | [Nguyễn Vũ Hiệp](doc/week_1/Nguyễn%20Vũ%20Hiệp%20-%2020233392.md) | [Lê Anh Đức](doc/week_1/Lê%20Anh%20Đức%20-%2020233324.md) (Giai đoạn 1)
+  - [Tuần 2](doc/week_2) | [Tuần 3](doc/week_3) | [Tuần 4](doc/week_4) | [Tuần 5](doc/week_5) | [Tuần 6](doc/week_6)
 - **Kế hoạch 6 tuần & Phân công nhiệm vụ chi tiết:** [plans/README.md](plans/README.md)
   - [Thành viên 1 (Hạ tầng mạng, mbuf, loss simulator & RTO)](plans/members/member_1_tv1.md)
   - [Thành viên 2 (Tầng giao vận TCP, Out-of-Order & Tắc nghẽn Reno/BBR)](plans/members/member_2_tv2.md)
   - [Thành viên 3 (Hệ thống tệp 1MB, Socket VFS, Multi-worker HTTP & Trực quan hóa)](plans/members/member_3_tv3.md)
   - Lộ trình từng tuần: [Tuần 1](plans/weeks/week_1.md) | [Tuần 2](plans/weeks/week_2.md) | [Tuần 3](plans/weeks/week_3.md) | [Tuần 4](plans/weeks/week_4.md) | [Tuần 5](plans/weeks/week_5.md) | [Tuần 6](plans/weeks/week_6.md)
-- Phase 1 Architecture Breakdown: [doc/phase1.md](doc/phase1.md)
-- Phase 2 Implementation & Troubleshooting Report: [doc/phase2.md](doc/phase2.md)
 
 ## Requirements
 

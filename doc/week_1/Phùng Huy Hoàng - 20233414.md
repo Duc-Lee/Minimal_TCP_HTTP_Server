@@ -1,4 +1,12 @@
-# Báo Cáo Triển Khai Chi Tiết Giai Đoạn 2: Gia Cố Kernel Mạng, Khử Lỗi Deadlock, Cấu Hình Rớt Gói Động & Chuẩn Hóa RTO Timer
+# TIẾN TRÌNH TUẦN 1 - PHÙNG HUY HOÀNG (MSSV: 20233414)
+## Báo Cáo Triển Khai Giai Đoạn 2: Gia Cố Kernel Mạng, Khử Lỗi Deadlock, Cấu Hình Rớt Gói Động & Chuẩn Hóa RTO Timer
+
+* **Người thực hiện:** Phùng Huy Hoàng - MSSV: 20233414
+* **Tuần:** Tuần 1 (Week 1)
+* **Vai trò:** Thành viên 1 (TV1) - Hạ tầng Mạng, Quản lý Bộ nhớ Mbuf & Driver E1000
+* **Repository:** Minimal_TCP_HTTP_Server (xv6-riscv 64-bit)
+
+---
 
 Tài liệu này mô tả chi tiết toàn bộ quá trình kiểm toán mã nguồn, phát hiện lỗi tiềm ẩn, thiết kế giải pháp kỹ thuật, triển khai mã nguồn và đo đạc kết quả thực nghiệm trong **Giai đoạn 2 (Tuần 1 – Tối ưu hóa toàn diện & Hoàn thiện nhiệm vụ Thành viên 1)** của dự án Minimal TCP & HTTP Server trên hệ điều hành **xv6-riscv** (64-bit).
 
@@ -59,16 +67,16 @@ Giai đoạn 2 tập trung nâng cấp hệ thống mạng từ mức prototype 
 * **Nguy cơ:** `clone->buf` là mảng chứa dữ liệu thô. Khi gói tin được bọc các header qua `mbufpush()`, nếu `head` lùi sát về đầu mảng `buf`, thao tác ghi đè này sẽ phá hỏng header mạng hoặc làm sai lệch giá trị `seq_end` khi giải phóng ACK.
 * **Giải pháp kỹ thuật:**
   - Bổ sung trường tường minh vào `struct mbuf` trong `kernel/net.h`:
-    ```c
-    struct mbuf {
-      struct mbuf *next;
-      char        *head;
-      unsigned int len;
-      int          ref_cnt;
-      uint32       seq_end;        // metadata: sequence ket thuc cua segment
-      char         buf[MBUF_SIZE];
-    };
-    ```
+     ```c
+     struct mbuf {
+       struct mbuf *next;
+       char        *head;
+       unsigned int len;
+       int          ref_cnt;
+       uint32       seq_end;        // metadata: sequence ket thuc cua segment
+       char         buf[MBUF_SIZE];
+     };
+     ```
   - Cập nhật `kernel/tcp_output.c`: `clone->seq_end = seq_end;`.
   - Cập nhật `kernel/tcp_input.c`: `uint32 seg_end = (*pq)->seq_end;`.
 
