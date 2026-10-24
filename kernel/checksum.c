@@ -6,8 +6,7 @@
 #include "net.h"
 
 // tinh checksum rfc 1071 bu 1
-uint16
-in_cksum(const void *buf, int len)
+uint16 in_cksum(const void *buf, int len)
 {
   const uint8 *data = (const uint8 *)buf;
   uint32 sum = 0;
