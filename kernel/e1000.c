@@ -25,7 +25,7 @@ uint8 local_mac[ETH_ADDR_LEN] = {0x52, 0x54, 0x00, 0x12, 0x34, 0x56};
 
 // gia lap rot goi co the cau hinh qua syscall de test tcp retransmit
 static uint32 packet_loss_seed = 12345;
-static int packet_loss_rate = 10; // mac dinh 10%
+static int packet_loss_rate = 0; // mac dinh 0%, bat bang setloss khi can test
 
 int
 e1000_set_loss_rate(int rate)

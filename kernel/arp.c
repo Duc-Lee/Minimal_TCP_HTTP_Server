@@ -8,10 +8,17 @@
 
 #define ARP_TABLE_SIZE 16
 
+// xv6 chay timer 10hz nen 1 tick = 100ms
+#define ARP_TICKS_PER_SEC   10
+#define ARP_AGE_TICKS       (60 * ARP_TICKS_PER_SEC) // entry khong dung 60s thi xoa
+#define ARP_PENDING_TICKS   (5 * ARP_TICKS_PER_SEC)  // cho arp reply toi da 5s
+#define ARP_SWEEP_TICKS     ARP_TICKS_PER_SEC        // quet bang moi 1s
+
 struct arp_entry {
   uint32 ip;
   uint8 mac[ETH_ADDR_LEN];
   int valid;
+  uint last_seen_tick;        // tick lan cuoi entry duoc hoc/su dung (hoac luc tao pending)
   struct mbuf *pending_queue; // giu goi cho phan giai mac
 };
 
@@ -30,7 +37,49 @@ arp_init(void)
   acquire(&arp_cache.lock);
   for (int i = 0; i < ARP_TABLE_SIZE; i++) {
     arp_cache.entries[i].valid = 0;
+    arp_cache.entries[i].last_seen_tick = 0;
     arp_cache.entries[i].pending_queue = 0;
+  }
+  release(&arp_cache.lock);
+}
+
+// giai phong cac mbuf dang cho trong pending_queue cua mot entry
+static void
+arp_drop_pending(struct arp_entry *e)
+{
+  struct mbuf *p = e->pending_queue;
+  e->pending_queue = 0;
+  while (p) {
+    struct mbuf *next = p->next;
+    p->next = 0;
+    mbuffree(p);
+    p = next;
+  }
+}
+
+// quet bang arp: xoa entry het han va giai phong goi dang cho
+// goi tu clockintr moi tick, nhung chi thuc su quet moi ARP_SWEEP_TICKS
+void
+arp_age_tick(void)
+{
+  if (ticks % ARP_SWEEP_TICKS != 0)
+    return;
+
+  acquire(&arp_cache.lock);
+  for (int i = 0; i < ARP_TABLE_SIZE; i++) {
+    struct arp_entry *e = &arp_cache.entries[i];
+    if (e->valid) {
+      // entry da co mac nhung khong dung qua 60s
+      if (ticks - e->last_seen_tick >= ARP_AGE_TICKS) {
+        arp_drop_pending(e);
+        e->valid = 0;
+      }
+    } else if (e->pending_queue) {
+      // dang cho reply qua lau: bo cac goi cho de khong ro ri mbuf
+      if (ticks - e->last_seen_tick >= ARP_PENDING_TICKS) {
+        arp_drop_pending(e);
+      }
+    }
   }
   release(&arp_cache.lock);
 }
@@ -130,23 +179,28 @@ arp_input(struct mbuf *m)
   int updated = 0;
   int free_slot = -1;
   for (int i = 0; i < ARP_TABLE_SIZE; i++) {
-    if (arp_cache.entries[i].valid && arp_cache.entries[i].ip == sip) {
+    struct arp_entry *e = &arp_cache.entries[i];
+    // khop entry da co mac, hoac entry dang cho reply (valid=0 nhung con pending_queue)
+    if (e->ip == sip && (e->valid || e->pending_queue)) {
       for (int j = 0; j < ETH_ADDR_LEN; j++)
-        arp_cache.entries[i].mac[j] = arphdr->sha[j];
+        e->mac[j] = arphdr->sha[j];
+      e->valid = 1;
+      e->last_seen_tick = ticks;
 
       // day cac goi dang cho trong queue di tiep
-      struct mbuf *p = arp_cache.entries[i].pending_queue;
-      arp_cache.entries[i].pending_queue = 0;
+      struct mbuf *p = e->pending_queue;
+      e->pending_queue = 0;
       while (p) {
         struct mbuf *next = p->next;
         p->next = 0;
-        eth_output(p, arp_cache.entries[i].mac, ETH_TYPE_IP);
+        eth_output(p, e->mac, ETH_TYPE_IP);
         p = next;
       }
       updated = 1;
       break;
     }
-    if (!arp_cache.entries[i].valid && free_slot < 0)
+    // slot trong that su: khong valid va khong giu goi nao dang cho
+    if (!e->valid && !e->pending_queue && free_slot < 0)
       free_slot = i;
   }
 
@@ -156,6 +210,7 @@ arp_input(struct mbuf *m)
     for (int j = 0; j < ETH_ADDR_LEN; j++)
       arp_cache.entries[free_slot].mac[j] = arphdr->sha[j];
     arp_cache.entries[free_slot].valid = 1;
+    arp_cache.entries[free_slot].last_seen_tick = ticks;
     arp_cache.entries[free_slot].pending_queue = 0;
   }
 
@@ -184,6 +239,7 @@ arp_resolve(uint32 ip, uint8 *mac_out, struct mbuf *pending_m)
     if (arp_cache.entries[i].valid && arp_cache.entries[i].ip == ip) {
       for (int j = 0; j < ETH_ADDR_LEN; j++)
         mac_out[j] = arp_cache.entries[i].mac[j];
+      arp_cache.entries[i].last_seen_tick = ticks; // dang duoc dung, lam moi tuoi tho
       release(&arp_cache.lock);
       return 0; // da co mac trong cache
     }
@@ -192,14 +248,25 @@ arp_resolve(uint32 ip, uint8 *mac_out, struct mbuf *pending_m)
   // chua co trong cache: treo goi tin vao pending_queue va gui arp request
   if (pending_m) {
     int slot = -1;
+    // uu tien slot dang cho reply cua cung ip nay de khong tao entry trung
     for (int i = 0; i < ARP_TABLE_SIZE; i++) {
-      if (!arp_cache.entries[i].valid) {
+      if (!arp_cache.entries[i].valid && arp_cache.entries[i].pending_queue &&
+          arp_cache.entries[i].ip == ip) {
         slot = i;
         break;
       }
     }
+    if (slot < 0) {
+      for (int i = 0; i < ARP_TABLE_SIZE; i++) {
+        if (!arp_cache.entries[i].valid && !arp_cache.entries[i].pending_queue) {
+          slot = i;
+          arp_cache.entries[i].ip = ip;
+          arp_cache.entries[i].last_seen_tick = ticks; // moc thoi gian de timeout cho reply
+          break;
+        }
+      }
+    }
     if (slot >= 0) {
-      arp_cache.entries[slot].ip = ip;
       arp_cache.entries[slot].valid = 0; // chua co mac, cho reply
       pending_m->next = arp_cache.entries[slot].pending_queue;
       arp_cache.entries[slot].pending_queue = pending_m;

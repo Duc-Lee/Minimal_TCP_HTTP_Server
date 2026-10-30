@@ -173,6 +173,7 @@ clockintr()
     wakeup(&ticks);
     release(&tickslock);
     tcp_timer_tick();
+    arp_age_tick(); // xoa entry arp het han (60s) va goi cho reply qua lau
   }
 
   // ask for the next timer interrupt. this also clears

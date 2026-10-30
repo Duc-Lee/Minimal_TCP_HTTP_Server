@@ -131,6 +131,7 @@ int eth_output(struct mbuf *m, uint8 *dst_mac, uint16 eth_type);
 
 // arp (kernel/arp.c)
 void arp_init(void);
+void arp_age_tick(void);
 void arp_input(struct mbuf *m);
 int arp_resolve(uint32 ip, uint8 *mac_out, struct mbuf *pending_m);
 
