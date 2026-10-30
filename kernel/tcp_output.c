@@ -88,3 +88,49 @@ tcp_output(struct tcp_pcb *pcb, struct mbuf *m, uint8 flags)
 
   return ip_output(m, pcb->remote_ip, IP_PROTO_TCP);
 }
+
+// phan hoi goi tin co co RST theo chuan RFC 793 khi nhan segment tai cong dong
+void
+tcp_send_rst(uint32 local_ip, uint16 local_port, uint32 remote_ip,
+             uint16 remote_port, uint32 in_seq, uint32 in_ack,
+             uint8 in_flags, int in_datalen)
+{
+  if (in_flags & TCP_FLAG_RST)
+    return;
+
+  struct mbuf *m = mbufalloc(MBUF_DEFAULT_HEAD);
+  if (!m)
+    return;
+
+  struct tcphdr *th = (struct tcphdr *)mbufpush(m, sizeof(struct tcphdr));
+  if (!th) {
+    mbuffree(m);
+    return;
+  }
+
+  memset(th, 0, sizeof(struct tcphdr));
+  th->sport = htons(local_port);
+  th->dport = htons(remote_port);
+  th->off = (sizeof(struct tcphdr) / 4) << 4;
+  th->win = 0;
+  th->urp = 0;
+
+  // Theo RFC 793 Page 36 (Reset Generation):
+  if (in_flags & TCP_FLAG_ACK) {
+    th->seq = htonl(in_ack);
+    th->ack = 0;
+    th->flags = TCP_FLAG_RST;
+  } else {
+    th->seq = 0;
+    uint32 ack_num = in_seq + in_datalen;
+    if (in_flags & (TCP_FLAG_SYN | TCP_FLAG_FIN))
+      ack_num++;
+    th->ack = htonl(ack_num);
+    th->flags = TCP_FLAG_RST | TCP_FLAG_ACK;
+  }
+
+  th->cksum = 0;
+  th->cksum = tcp_checksum(m, local_ip, remote_ip);
+
+  ip_output(m, remote_ip, IP_PROTO_TCP);
+}

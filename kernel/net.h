@@ -101,6 +101,7 @@ struct mbuf {
   char        *head;           // con tro tro vao dau goi
   unsigned int len;            // do dai data
   int          ref_cnt;        // dem tham chieu
+  uint32       seq;            // metadata: sequence bat dau cua segment
   uint32       seq_end;        // metadata: sequence ket thuc cua segment
   char         buf[MBUF_SIZE]; // vung dem chua du lieu
 };
@@ -184,6 +185,7 @@ struct tcp_pcb {
 
   // retransmit queue va timer tinh theo jacobson
   struct mbuf *retransmit_q;
+  struct mbuf *ooo_queue; // hang doi goi den lech thu tu (out-of-order)
   uint32 srtt;
   uint32 rttvar;
   uint32 rto;
@@ -206,6 +208,9 @@ void tcp_update_rto(struct tcp_pcb *pcb, uint32 rtt_msec);
 
 void tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip);
 int tcp_output(struct tcp_pcb *pcb, struct mbuf *m, uint8 flags);
+void tcp_send_rst(uint32 local_ip, uint16 local_port, uint32 remote_ip,
+                  uint16 remote_port, uint32 in_seq, uint32 in_ack,
+                  uint8 in_flags, int in_datalen);
 void tcp_timer_tick(void);
 void tcp_timer_process(void);
 

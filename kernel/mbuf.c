@@ -42,6 +42,7 @@ mbufalloc(unsigned int headroom)
     mbuf_pool.free_list = m->next;
     m->next = 0;
     m->ref_cnt = 1;
+    m->seq = 0;
     m->seq_end = 0;
     m->head = m->buf + headroom;
     m->len = 0;
@@ -70,6 +71,7 @@ mbufalloc_wait(unsigned int headroom)
   mbuf_pool.free_list = m->next;
   m->next = 0;
   m->ref_cnt = 1;
+  m->seq = 0;
   m->seq_end = 0;
   m->head = m->buf + headroom;
   m->len = 0;

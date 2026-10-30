@@ -69,6 +69,7 @@ tcp_pcb_alloc(void)
     pcb->backoff = 0;
     pcb->dup_acks = 0;
     pcb->retransmit_q = 0;
+    pcb->ooo_queue = 0;
     pcb->rto_deadline = 0;
     pcb->sock = 0;
     pcb->local_ip = 0;
@@ -119,6 +120,16 @@ tcp_pcb_free(struct tcp_pcb *pcb)
     p = next;
   }
   pcb->retransmit_q = 0;
+
+  // free ooo queue
+  struct mbuf *q = pcb->ooo_queue;
+  while (q) {
+    struct mbuf *next = q->next;
+    q->next = 0;
+    mbuffree(q);
+    q = next;
+  }
+  pcb->ooo_queue = 0;
 
   acquire(&tcp_mgr.lock);
 
@@ -197,7 +208,9 @@ tcp_timer_process(void)
     // het han time_wait
     if (pcb->state == TCP_TIME_WAIT) {
       if (pcb->rto_deadline > 0 && ticks >= pcb->rto_deadline) {
-        pcb->state = TCP_CLOSED;
+        release(&pcb->lock);
+        tcp_pcb_free(pcb);
+        continue;
       }
       release(&pcb->lock);
       continue;

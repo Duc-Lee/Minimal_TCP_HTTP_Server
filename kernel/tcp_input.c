@@ -21,6 +21,43 @@ sock_push_data(struct tcp_pcb *pcb, struct mbuf *m)
   mbuffree(m);
 }
 
+#define TCP_OOO_MAX 16
+
+// chen segment out-of-order vao ooo_queue theo thu tu seq tang dan
+static void
+tcp_ooo_insert(struct tcp_pcb *pcb, struct mbuf *m, uint32 seq)
+{
+  m->seq = seq;
+  m->seq_end = seq + m->len;
+
+  int count = 0;
+  struct mbuf *curr = pcb->ooo_queue;
+  while (curr) {
+    count++;
+    curr = curr->next;
+  }
+  if (count >= TCP_OOO_MAX) {
+    mbuffree(m);
+    return;
+  }
+
+  struct mbuf **pp = &pcb->ooo_queue;
+  while (*pp) {
+    if ((int32)(seq - (*pp)->seq) < 0) {
+      break;
+    }
+    if (seq == (*pp)->seq) {
+      // trung lap seq, giai phong goi moi
+      mbuffree(m);
+      return;
+    }
+    pp = &(*pp)->next;
+  }
+
+  m->next = *pp;
+  *pp = m;
+}
+
 // xu ly ack, don retransmit_q, fast retransmit va wakeup writer
 static void
 tcp_handle_ack(struct tcp_pcb *pcb, uint32 ack, uint16 win)
@@ -108,6 +145,9 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
 
   struct tcp_pcb *pcb = tcp_lookup(src_ip, sport, dst_ip, dport);
   if (!pcb) {
+    if (!(flags & TCP_FLAG_RST)) {
+      tcp_send_rst(dst_ip, dport, src_ip, sport, seq, ack, flags, m->len);
+    }
     mbuffree(m);
     return;
   }
@@ -118,6 +158,14 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
   if (flags & TCP_FLAG_RST) {
     if (pcb->state != TCP_LISTEN && pcb->state != TCP_CLOSED) {
       pcb->state = TCP_CLOSED;
+      struct mbuf *q = pcb->ooo_queue;
+      while (q) {
+        struct mbuf *next = q->next;
+        q->next = 0;
+        mbuffree(q);
+        q = next;
+      }
+      pcb->ooo_queue = 0;
       wakeup(pcb);
       if (pcb->sock)
         sock_push_eof((struct socket *)pcb->sock);
@@ -211,19 +259,98 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
       tcp_handle_ack(pcb, ack, win);
     }
 
-    // nhan payload in-order
+    // xu ly payload
     if (m->len > 0) {
+      // neu seq < rcv_nxt: goi tin cu hoac trung lap phan dau
+      if ((int32)(seq - pcb->rcv_nxt) < 0) {
+        int trim = (int)(pcb->rcv_nxt - seq);
+        if (trim >= (int)m->len) {
+          // toan bo payload da duoc nhan truoc do
+          release(&pcb->lock);
+          mbuffree(m);
+          tcp_output(pcb, 0, TCP_FLAG_ACK);
+          return;
+        }
+        mbufpull(m, trim);
+        seq = pcb->rcv_nxt;
+      }
+
       if (seq == pcb->rcv_nxt) {
         pcb->rcv_nxt += m->len;
+
+        // kiem tra xem ooo_queue co chua cac segment ke tiep khong
+        struct mbuf *drain_head = 0;
+        struct mbuf **drain_tail = &drain_head;
+
+        while (pcb->ooo_queue) {
+          struct mbuf *q = pcb->ooo_queue;
+          if ((int32)(q->seq_end - pcb->rcv_nxt) <= 0) {
+            pcb->ooo_queue = q->next;
+            q->next = 0;
+            mbuffree(q);
+            continue;
+          }
+          if (q->seq == pcb->rcv_nxt) {
+            pcb->ooo_queue = q->next;
+            q->next = 0;
+            pcb->rcv_nxt += q->len;
+            *drain_tail = q;
+            drain_tail = &q->next;
+            continue;
+          }
+          if ((int32)(q->seq - pcb->rcv_nxt) < 0) {
+            int trim = (int)(pcb->rcv_nxt - q->seq);
+            mbufpull(q, trim);
+            q->seq = pcb->rcv_nxt;
+            pcb->ooo_queue = q->next;
+            q->next = 0;
+            pcb->rcv_nxt += q->len;
+            *drain_tail = q;
+            drain_tail = &q->next;
+            continue;
+          }
+          // gap hole, dung lai
+          break;
+        }
+
+        int has_fin = (flags & TCP_FLAG_FIN);
+        if (has_fin) {
+          pcb->rcv_nxt++;
+          pcb->state = TCP_CLOSE_WAIT;
+          if (pcb->sock)
+            sock_push_eof((struct socket *)pcb->sock);
+        }
+
         release(&pcb->lock);
+
+        // day goi in-order vao socket
         sock_push_data(pcb, m);
+
+        // day cac goi ke tiep tu ooo_queue vao socket
+        while (drain_head) {
+          struct mbuf *next = drain_head->next;
+          drain_head->next = 0;
+          sock_push_data(pcb, drain_head);
+          drain_head = next;
+        }
+
+        tcp_output(pcb, 0, TCP_FLAG_ACK);
+        return;
+      } else if ((int32)(seq - pcb->rcv_nxt) > 0) {
+        // goi lech thu tu (out-of-order)
+        if ((int32)((seq + m->len) - (pcb->rcv_nxt + pcb->rcv_wnd)) <= 0) {
+          tcp_ooo_insert(pcb, m, seq);
+        } else {
+          mbuffree(m);
+        }
+        release(&pcb->lock);
+        // gui Duplicate ACK thong bao rcv_nxt dang cho
         tcp_output(pcb, 0, TCP_FLAG_ACK);
         return;
       }
-      // out of order thi bo qua de doi retransmit
     }
 
-    // remote dong chieu gui
+    // remote dong chieu gui (FIN thuan khong co payload)
     if (flags & TCP_FLAG_FIN) {
       pcb->rcv_nxt++;
       pcb->state = TCP_CLOSE_WAIT;
