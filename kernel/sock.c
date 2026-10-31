@@ -128,6 +128,18 @@ sock_close(struct socket *s)
 
     if (pcb) {
       acquire(&pcb->lock);
+
+      // cho den khi ben kia ack het toan bo goi tin trong retransmit_q
+      while ((pcb->retransmit_q != 0 || (int32)(pcb->snd_nxt - pcb->snd_una) > 0) &&
+             (pcb->state == TCP_ESTABLISHED || pcb->state == TCP_CLOSE_WAIT)) {
+        if (killed(myproc()))
+          break;
+        sleep_prepare(pcb);
+        release(&pcb->lock);
+        sleep();
+        acquire(&pcb->lock);
+      }
+
       // huy con tro sock nguoc lai de tranh use-after-free khi pcb con song
       pcb->sock = 0;
       if (pcb->state == TCP_ESTABLISHED) {

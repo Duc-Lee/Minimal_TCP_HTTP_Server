@@ -231,8 +231,8 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
       return;
     }
     if (flags & TCP_FLAG_ACK) {
-      pcb->snd_una = ack;
-      pcb->snd_wnd = win;
+      // don goi syn-ack khoi retransmit_q va cap nhat snd_una
+      tcp_handle_ack(pcb, ack, win);
       pcb->state = TCP_ESTABLISHED;
 
       // day vao backlog cua socket listen de accept lay ra
@@ -365,7 +365,7 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
 
   case TCP_FIN_WAIT_1:
     if (flags & TCP_FLAG_ACK) {
-      pcb->snd_una = ack;
+      tcp_handle_ack(pcb, ack, win);
       if (flags & TCP_FLAG_FIN) {
         pcb->rcv_nxt++;
         pcb->state = TCP_TIME_WAIT;
@@ -383,6 +383,9 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
 
   // fin_wait_2: da nhan ack cho fin cua minh, cho fin tu remote
   case TCP_FIN_WAIT_2:
+    if (flags & TCP_FLAG_ACK) {
+      tcp_handle_ack(pcb, ack, win);
+    }
     if (flags & TCP_FLAG_FIN) {
       pcb->rcv_nxt++;
       pcb->state = TCP_TIME_WAIT;

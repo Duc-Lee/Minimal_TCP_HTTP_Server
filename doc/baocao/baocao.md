@@ -82,7 +82,7 @@ Tiến độ hiện tại đạt khoảng **50%** kế hoạch 6 tuần.
 * **Ghép nối gói lệch thứ tự (`ooo_queue`):** Khi nhận segment có `seq > rcv_nxt`, chèn vào `ooo_queue` theo thứ tự sequence tăng dần (tối đa 16 gói). Khi nhận được gói lấp chỗ trống (`seq == rcv_nxt`), kernel duyệt qua danh sách xả các đoạn dữ liệu liên tục lên socket, cập nhật `rcv_nxt` và gửi Cumulative ACK.
 * **Tạo gói RST (RFC 793 Page 36):** Nếu gói đến có cờ ACK thì gửi RST với `seq = in_ack`. Nếu gói đến không có ACK thì gửi RST với `seq = 0`, `ack = in_seq + in_datalen + 1`, bật cờ RST|ACK.
 * **ARP Cache Aging:** Ghi nhận `last_seen_tick` cho từng entry. Cứ 1 giây (10 tick), hàm `arp_age_tick` kiểm tra: nếu entry không dùng quá 60 giây thì xóa; nếu entry đang chờ reply quá 5 giây thì hủy và free toàn bộ mbuf trong `pending_queue`.
-* **Thu hồi tài nguyên socket an toàn:** Khi gọi `sock_close`, lập tức ngắt con trỏ `pcb->sock = 0` để các sự kiện mạng sau đó không truy cập vào socket đã giải phóng; đóng tất cả socket con chưa accept trong `backlog_q`.
+* **Thu hồi tài nguyên socket an toàn:** Khi gọi `sock_close`, kiểm tra và chờ toàn bộ dữ liệu trong `retransmit_q` được đối tác ACK hết trước khi gửi FIN (loại bỏ hoàn toàn lỗi mất đuôi file khi tải qua mạng rớt gói); lập tức ngắt con trỏ `pcb->sock = 0` để các sự kiện mạng sau đó không truy cập vào socket đã giải phóng; đóng tất cả socket con chưa accept trong `backlog_q`.
 
 ### b. Các tệp mã nguồn chỉnh sửa
 * `kernel/net.h`: Thêm trường `seq` vào `struct mbuf`, con trỏ `ooo_queue` vào `struct tcp_pcb`, khai báo `tcp_send_rst()`, `arp_age_tick()`.
