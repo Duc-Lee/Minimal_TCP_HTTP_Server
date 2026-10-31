@@ -112,10 +112,24 @@ sock_close(struct socket *s)
   if (s->ref_cnt <= 0) {
     struct tcp_pcb *pcb = s->pcb;
     s->pcb = 0;
+
+    // giai phong cac ket noi con ton dong trong hang doi backlog neu co
+    struct socket *q = s->backlog_q;
+    s->backlog_q = 0;
+    s->backlog_cnt = 0;
     release(&s->lock);
+
+    while (q) {
+      struct socket *next_q = q->next;
+      q->next = 0;
+      sock_close(q);
+      q = next_q;
+    }
 
     if (pcb) {
       acquire(&pcb->lock);
+      // huy con tro sock nguoc lai de tranh use-after-free khi pcb con song
+      pcb->sock = 0;
       if (pcb->state == TCP_ESTABLISHED) {
         pcb->state = TCP_FIN_WAIT_1;
         release(&pcb->lock);
@@ -129,6 +143,22 @@ sock_close(struct socket *s)
         tcp_pcb_free(pcb);
       }
     }
+
+    // danh thuc bat ky tien trinh nao dang cho tren rx/tx buffer
+    acquire(&s->rx_buf.lock);
+    s->rx_buf.eof = 1;
+    wakeup(&s->rx_buf);
+    release(&s->rx_buf.lock);
+
+    acquire(&s->tx_buf.lock);
+    wakeup(&s->tx_buf);
+    release(&s->tx_buf.lock);
+
+    wakeup(s);
+
+    // lam sach trang thai ring buffer truoc khi tra ve free_list
+    ringbuf_init(&s->rx_buf);
+    ringbuf_init(&s->tx_buf);
 
     acquire(&sock_table.lock);
     s->next = sock_table.free_list;
@@ -149,6 +179,12 @@ sock_read(struct socket *s, uint64 addr, int n)
   if (!s || n <= 0)
     return 0;
 
+  // neu buffer da can va remote da gui fin hoac connection reset thi bao eof (0)
+  if (ringbuf_avail(&s->rx_buf) == 0) {
+    if (s->rx_buf.eof || !s->pcb || s->pcb->state == TCP_CLOSED)
+      return 0;
+  }
+
   // doc block dau tien, neu chua co data thi sleep cho
   int chunk = n;
   if (chunk > (int)sizeof(kbuf))
@@ -156,7 +192,7 @@ sock_read(struct socket *s, uint64 addr, int n)
 
   int r = ringbuf_read(&s->rx_buf, kbuf, chunk);
   if (r <= 0)
-    return r;
+    return r; // tra ve 0 khi client dong ket noi (eof)
 
   if (either_copyout(1, addr, kbuf, r) < 0)
     return -1;
@@ -186,11 +222,15 @@ sock_write(struct socket *s, uint64 addr, int n)
 {
   int total_written = 0;
 
-  if (!s || !s->pcb ||
-      (s->pcb->state != TCP_ESTABLISHED && s->pcb->state != TCP_CLOSE_WAIT))
+  if (!s || !s->pcb)
     return -1;
 
   struct tcp_pcb *pcb = s->pcb;
+
+  // socket da o trang thai dong thi bao loi epipe (-1)
+  if (pcb->state == TCP_CLOSED ||
+      (pcb->state != TCP_ESTABLISHED && pcb->state != TCP_CLOSE_WAIT))
+    return -1;
 
   while (total_written < n) {
     // flow control: gioi han so goi in-flight tranh tran buffer va nghen mang
@@ -207,22 +247,32 @@ sock_write(struct socket *s, uint64 addr, int n)
       sleep();
       acquire(&pcb->lock);
     }
-    release(&pcb->lock);
 
-    if (pcb->state != TCP_ESTABLISHED && pcb->state != TCP_CLOSE_WAIT)
+    // neu ket noi bi ngat hoac chuyen sang tcp_closed trong luc cho
+    if (pcb->state != TCP_ESTABLISHED && pcb->state != TCP_CLOSE_WAIT) {
+      release(&pcb->lock);
+      if (total_written == 0)
+        return -1; // epipe: socket hong ngay truoc khi gui duoc byte nao
       break;
+    }
+    release(&pcb->lock);
 
     int chunk = n - total_written;
     if (chunk > 1400)
       chunk = 1400;
 
     struct mbuf *m = mbufalloc_wait(MBUF_DEFAULT_HEAD);
-    if (!m)
+    if (!m) {
+      if (total_written == 0)
+        return -1;
       break;
+    }
 
     char *dst = mbufput(m, chunk);
     if (!dst) {
       mbuffree(m);
+      if (total_written == 0)
+        return -1;
       break;
     }
 
@@ -234,6 +284,8 @@ sock_write(struct socket *s, uint64 addr, int n)
     }
 
     if (tcp_output(pcb, m, TCP_FLAG_ACK) < 0) {
+      if (total_written == 0)
+        return -1;
       break;
     }
 

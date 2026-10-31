@@ -44,8 +44,6 @@ handle_http_client(int client_fd)
     strcpy(path, "README");
   }
 
-  printf("httpd: target path='%s'\n", path);
-
   // mo file tren he thong file
   int file_fd = open(path, O_RDONLY);
   if (file_fd < 0) {
@@ -87,22 +85,22 @@ main(int argc, char *argv[])
   if (argc > 1)
     port = atoi(argv[1]);
 
-  printf("Starting xv6 httpd server (HTTP/1.0) on port %d...\n", port);
+  printf("httpd: listening on port %d\n", port);
 
   int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
   if (listen_fd < 0) {
-    printf("httpd: socket() failed\n");
+    printf("httpd: socket failed\n");
     exit(1);
   }
 
   if (bind(listen_fd, INADDR_ANY, port) < 0) {
-    printf("httpd: bind() failed\n");
+    printf("httpd: bind failed\n");
     close(listen_fd);
     exit(1);
   }
 
   if (listen(listen_fd, 5) < 0) {
-    printf("httpd: listen() failed\n");
+    printf("httpd: listen failed\n");
     close(listen_fd);
     exit(1);
   }

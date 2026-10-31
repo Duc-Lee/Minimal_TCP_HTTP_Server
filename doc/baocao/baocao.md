@@ -10,141 +10,171 @@
 3. Lê Anh Đức - 20233324  
 
 **Reported working period:**  
-from: [Bổ sung ngày bắt đầu] to: [Bổ sung ngày kết thúc]
+from: [Ngày bắt đầu Tuần 2] to: [Ngày kết thúc Tuần 2]
 
 ---
 
 ## Summary of latest progress
 
-Trong tuần đầu tiên, nhóm em đã hoàn thành giai đoạn khởi tạo, thiết kế kiến trúc và triển khai thành công toàn bộ khung cốt lõi (Giai đoạn 1 - MVP) của hệ thống ngăn xếp mạng TCP/IP tối giản (Minimal TCP/IP Stack) cùng Web Server HTTP/1.0 nhúng trực tiếp trong kernel hệ điều hành giáo dục **xv6-riscv** (64-bit). Trọng tâm của tuần này tập trung vào 3 hạng mục nền tảng:
-1. Xây dựng Driver mạng cho card NIC Intel 82540EM (E1000) trên QEMU cùng bộ đệm `mbuf` và bộ lọc giả lập tỉ lệ rớt gói 10%.
-2. Hiện thực các tầng giao thức mạng: Ethernet II (L2), ARP Resolution & Dynamic Cache, IPv4 routing & RFC 1071 Internet Checksum (L3), và TCP FSM 11 trạng thái với Sliding Window, Retransmission Queue và RTO dynamic calculation (L4).
-3. Tích hợp BSD Socket API vào VFS xv6 (`FD_SOCK`) và xây dựng user-space HTTP/1.0 Server (`httpd`) có khả năng truyền tải thành công tệp dữ liệu 1 MB (`/file1mb`) về máy Host trong điều kiện mạng rớt gói 10%, mã băm SHA-256 khớp 100%.
+Ở Tuần 1, nhóm mới dựng xong khung mạng cơ bản (MVP) để chạy thử: driver E1000, IP, ARP, TCP 11 trạng thái, socket VFS và web server đọc dữ liệu giả trong RAM. Tuy nhiên bản Tuần 1 còn nhiều hạn chế:
+- Gói tin đến lệch thứ tự (out-of-order) bị drop thẳng tay, bên gửi phải chờ timeout RTO để gửi lại toàn bộ.
+- Nhận gói tin vào cổng chưa mở thì im lặng bỏ qua, không gửi cờ RST làm đối tác bị treo.
+- Tỉ lệ rớt gói 10% bị sửa cứng trong driver, không chỉnh được lúc đang chạy.
+- Hệ thống tệp xv6 chỉ chứa được file tối đa ~268 KB, chưa lưu được file 1 MB thật trên đĩa.
+- Tầng socket chưa bắt chặt các trường hợp ngắt kết nối (RST/FIN), dễ bị lỗi use-after-free khi đóng socket.
 
-Bên cạnh đó, các thành viên khác trong nhóm cũng đã hoàn thành việc rà soát kiến trúc để chuẩn bị cho các giai đoạn tiếp theo: kế hoạch tối ưu hóa chống Deadlock / rò rỉ bộ nhớ / RTO calibration (Giai đoạn 2), cũng như phương án nâng cấp hệ thống tệp Inode Doubly-Indirect để phục vụ đọc file 1 MB thật từ đĩa (Giai đoạn 3).
+Trong Tuần 2, nhóm tập trung giải quyết các vấn đề trên:
+1. **Xử lý gói lệch thứ tự:** Thêm hàng đợi `ooo_queue` trong PCB để giữ lại các gói đến sớm, khi nhận được gói bị thiếu thì tự động ráp nối dữ liệu và đẩy lên socket.
+2. **Phản hồi TCP RST theo RFC 793:** Cài đặt hàm `tcp_send_rst()`, gửi gói RST khi nhận packet ở cổng đóng để đối tác nhận diện lỗi ngay.
+3. **Cấu hình rớt gói động & ARP Aging:** Chuyển tỉ lệ drop gói thành biến động qua syscall `set_loss_rate` / `get_loss_rate` và viết lệnh `setloss`; thêm cơ chế tự xóa bản ghi ARP cũ sau 60 giây.
+4. **Đọc file 1 MB thật từ đĩa:** Nâng cấp Inode Doubly-Indirect trong hệ thống tệp và `mkfs`, cho phép lưu file lớn (~65.8 MB). Web server chuyển sang mở và đọc file thật `largefile.bin` từ đĩa.
+5. **Sửa lỗi tầng Socket:** Xử lý `sock_read` trả về EOF (0) khi nhận FIN/RST, `sock_write` trả về -1 khi đứt kết nối, sửa `sock_close` ngắt liên kết `pcb->sock` để tránh use-after-free và giải phóng backlog.
+6. **Viết test tự động:** Viết bộ test `tests/state_tests.py` và script `tests/run_tests.py` kiểm tra tự động 6 ca trạng thái TCP FSM.
 
-Tiến độ hiện tại của dự án bám sát và thậm chí vượt kế hoạch đề ra của Tuần 1. Xét trên tổng thể 6 tuần, nhóm đánh giá **cumulative progress đạt khoảng 25–30%**, đã nghiệm thu đầy đủ Giai đoạn 1 (Core Network Stack & HTTP Server) và sẵn sàng tích hợp các module nâng cao.
+Tiến độ hiện tại đạt khoảng **50%** kế hoạch 6 tuần.
 
 ---
 
 ## Review of technical activities
 
-* **Activity 1: Hiện thực Driver NIC Intel 82540EM (E1000) và cơ chế cấp phát bộ đệm `mbuf`**  
-  Nhóm đã tiến hành khởi tạo phần cứng card mạng Intel 82540EM theo chuẩn PCI; thiết lập DMA Ring Buffer với 16 TX descriptors và 16 RX descriptors; cấu hình ngắt phần cứng nhận gói (`RXT0`). Xây dựng cấu trúc quản lý bộ đệm gói tin `struct mbuf` và tích hợp bộ lọc ngẫu nhiên LCG trong driver nhằm giả lập tỉ lệ rớt gói 10% cho các gói tin IP/TCP để kiểm thử tính chịu lỗi của tầng giao vận.
+* **Xử lý gói out-of-order và phản hồi RST (Hoàng):**
+  Thêm con trỏ `ooo_queue` vào `struct tcp_pcb` và trường `seq` vào `struct mbuf`. Cài đặt hàm `tcp_ooo_insert` để lưu tối đa 16 gói lệch thứ tự theo thứ tự sequence tăng dần. Khi gói thiếu đến, hàm duyệt hàng đợi để xả các đoạn dữ liệu liên tục lên socket và gửi Duplicate ACK khi nhận gói lệch. Cài đặt hàm `tcp_send_rst` tạo gói RST với seq/ack theo đúng RFC 793.
 
-* **Activity 2: Xây dựng tầng mạng L2/L3 (Ethernet II, ARP Resolution, IPv4 & Checksum RFC 1071)**  
-  Đóng gói và bóc tách Ethernet frame; triển khai giao thức ARP với bảng ARP cache động, tự động gửi ARP Request broadcast và xử lý ARP Reply; cài đặt xử lý IPv4 Header (TTL, kiểm tra địa chỉ đích `local_ip`); cài đặt thuật toán tính bù 1 Internet Checksum chuẩn RFC 1071 áp dụng chung cho cả IPv4 và TCP Pseudo-Header.
+* **Điều khiển rớt gói động và ARP aging (Hiệp):**
+  Chuyển `packet_loss_rate` trong `kernel/e1000.c` sang cấu hình động (mặc định 0%). Thêm 2 syscall `sys_set_loss_rate`, `sys_get_loss_rate` và viết công cụ `user/setloss.c`. Thêm trường `last_seen_tick` trong `struct arp_entry`, hàm `arp_age_tick` được gọi từ `clockintr()` mỗi 1 giây để xóa các bản ghi quá 60 giây và dọn các gói chờ quá 5 giây.
 
-* **Activity 3: Triển khai tầng giao vận TCP (RFC 793), Socket VFS & HTTP Server**  
-  Thiết kế máy trạng thái hữu hạn TCP FSM 11 trạng thái; cơ chế bắt tay 3 bước (3-Way Handshake) và đóng kết nối 4 bước; thuật toán Sliding Window điều khiển luồng; hàng đợi truyền lại `retransmit_q` kết hợp tính toán RTO động theo Jacobson/Karels (RFC 6298) và Fast Retransmit (RFC 5681). Tích hợp các system call chuẩn BSD Socket (`socket`, `bind`, `listen`, `accept`, `connect`) vào Virtual File System dưới dạng `FD_SOCK`. Viết tiến trình người dùng `httpd` phục vụ request HTTP/1.0 tĩnh và endpoint kiểm thử luồng nhị phân 1 MB.
+* **Sửa lỗi tầng socket, đọc đĩa thật và test tự động (Đức):**
+  Sửa `sock_close` trong `kernel/sock.c`: gán `pcb->sock = 0` tránh use-after-free khi PCB sống tiếp ở `FIN_WAIT_1` / `LAST_ACK`, duyệt giải phóng `backlog_q`, đánh thức thread và reset ring buffer. Sửa `sock_read` trả về 0 khi nhận FIN/RST, `sock_write` trả về -1 khi socket bị đóng. Chỉnh `user/httpd.c` đọc file thật 1 MB từ đĩa qua `open()`/`read()`. Viết bộ script `tests/state_tests.py` và `tests/run_tests.py`.
 
 ---
 
 ## Personal contribution
 
-* **Member 1: Phùng Huy Hoàng - 20233414**  
-  Đảm nhiệm rà soát độ tin cậy của kernel mạng, khảo sát hiện tượng cạn kiệt bộ đệm và lên phương án gia cố cho Giai đoạn 2: phân tích lỗi tiềm ẩn Deadlock trong `sock_write` khi hết `mbuf`, thiết kế cơ chế đánh thức `wakeup` trong `mbuffree`, thiết kế system call cấu hình động tỉ lệ rớt gói (`sys_set_loss_rate`), và chuẩn hóa nhịp xung RTO timer.  
-  *Output:* Báo cáo phân tích nguy cơ Deadlock và kiến trúc RTO timer; tài liệu thiết kế system call điều khiển packet loss.
+* **Phùng Huy Hoàng - 20233414**  
+  - *Tuần 1:* Khảo sát lý thuyết nguy cơ deadlock bộ đệm mbuf và cơ chế tính RTO.
+  - *Tuần 2:*
+    1. Cài đặt hàng đợi `ooo_queue` trong `struct tcp_pcb`, viết hàm `tcp_ooo_insert` sắp xếp gói out-of-order và logic ghép nối đẩy dữ liệu lên socket khi nhận đủ gói (`kernel/tcp_input.c`).
+    2. Cài đặt hàm `tcp_send_rst` trong `kernel/tcp_output.c` sinh gói RST/ACK chuẩn RFC 793 khi nhận gói ở cổng chưa mở hoặc kết nối không tồn tại.
+    3. Thu hồi mbuf trong `ooo_queue` và giải phóng PCB khi hết hạn `TIME_WAIT` (`kernel/tcp.c`).  
+  *Sản phẩm:* Code xử lý out-of-order và RST trong `kernel/net.h`, `kernel/tcp_input.c`, `kernel/tcp_output.c`, `kernel/tcp.c`.
 
-* **Member 2: Nguyễn Vũ Hiệp - 20233392**  
-  Đảm nhiệm khảo sát hệ thống tệp xv6 và thiết kế phương án nâng cấp Inode cho Giai đoạn 3: phân tích giới hạn kích thước tệp ~268 KB do chỉ có Singly-Indirect block; thiết kế cấu trúc `struct dinode` / `struct inode` hỗ trợ Doubly-Indirect Block nâng giới hạn lên ~65.8 MB; rà soát tính căn chỉnh bộ nhớ đĩa `sizeof(dinode) = 64 bytes`; chuẩn bị phương án cập nhật `bmap()` và `mkfs`.  
-  *Output:* Tài liệu thiết kế cấu trúc Inode Doubly-Indirect; kế hoạch chỉnh sửa `kernel/fs.c` và `mkfs/mkfs.c`.
+* **Nguyễn Vũ Hiệp - 20233392**  
+  - *Tuần 1:* Thiết kế trên giấy tờ cấu trúc Inode Doubly-Indirect để mở rộng dung lượng file.
+  - *Tuần 2:*
+    1. Cài đặt biến `packet_loss_rate` động, 2 system call `set_loss_rate` / `get_loss_rate` (`kernel/sysnet.c`) và viết lệnh CLI `user/setloss.c`.
+    2. Cài đặt cơ chế ARP Cache Aging trong `kernel/arp.c`, tự động xóa bản ghi cũ sau 60 giây và dọn gói chờ quá hạn.
+    3. Tích hợp cấu trúc Inode Doubly-Indirect trong `kernel/fs.c` và công cụ `mkfs/mkfs.c`, nhúng file 1 MB thật `user/largefile.bin` vào đĩa `fs.img`.  
+  *Sản phẩm:* Code trong `kernel/e1000.c`, `kernel/sysnet.c`, `kernel/arp.c`, `user/setloss.c`, `kernel/fs.c`, `mkfs/mkfs.c`.
 
-* **Member 3: Lê Anh Đức - 20233324**  
-  Chủ trì triển khai trọn vẹn toàn bộ Giai đoạn 1 (Cốt lõi MVP): cài đặt driver E1000, cấu trúc `mbuf`, Ethernet II, ARP, IPv4, Checksum RFC 1071, TCP FSM (11 trạng thái), Sliding Window, Retransmission RTO, Socket VFS (`FD_SOCK`), và Web Server HTTP/1.0 (`httpd`). Trực tiếp chạy demo, đo đạc truyền tải thành công tệp 1 MB từ guest xv6 về Host Linux qua curl với tỉ lệ rớt gói 10% và xác thực SHA-256 trùng khớp 100%.  
-  *Output:* Toàn bộ source code kernel network stack (`kernel/e1000.c`, `eth.c`, `arp.c`, `ip.c`, `checksum.c`, `tcp.c`, `tcp_input.c`, `tcp_output.c`, `tcp_timer.c`, `sock.c`, `sysnet.c`, `ringbuf.c`) và ứng dụng `user/httpd.c`; kết quả thực nghiệm và hash SHA-256 tệp 1 MB.
+* **Lê Anh Đức - 20233324**  
+  - *Tuần 1:* Xây dựng khung mạng cơ bản MVP (driver E1000, ARP, IP, TCP, socket VFS, httpd đọc RAM ảo).
+  - *Tuần 2:*
+    1. Sửa lỗi tầng Socket trong `kernel/sock.c`: `sock_read` trả về EOF (0) khi nhận FIN/RST; `sock_write` trả về -1 khi kết nối gãy; sửa `sock_close` hủy liên kết `pcb->sock = 0` tránh use-after-free, dọn dẹp hàng đợi backlog và reset ring buffer.
+    2. Sửa Web Server `user/httpd.c` chuyển từ sinh dữ liệu giả sang mở và đọc file thật `largefile.bin` 1 MB từ đĩa.
+    3. Viết bộ kiểm thử tự động `tests/state_tests.py` (6 bài test FSM) và runner `tests/run_tests.py` khởi chạy QEMU tự động.  
+  *Sản phẩm:* Code an toàn socket trong `kernel/sock.c`, server đọc đĩa thật `user/httpd.c`, bộ test tự động `tests/state_tests.py`, `tests/run_tests.py`.
 
 ---
 
 ## Developed code review
 
-### a. Algorithmic development
-* **Internet Checksum bù 1 (RFC 1071):** Triển khai tại `kernel/checksum.c`. Thuật toán tích lũy các từ 16-bit big-endian vào biến 32-bit `sum`, thực hiện gập các bit tràn `sum = (sum & 0xffff) + (sum >> 16)` cho đến khi triệt tiêu phần tràn, sau đó đảo bit `~sum`. Thuật toán đảm bảo tính chính xác tuyệt đối cho cả Header IPv4 lẫn TCP Pseudo Header.
-* **Máy trạng thái TCP FSM 11 trạng thái & Bắt tay 3 bước:** Triển khai tại `kernel/tcp.c`, `kernel/tcp_input.c`, `kernel/tcp_output.c`. Xử lý chuyển dịch trạng thái từ `LISTEN` $\rightarrow$ `SYN_RCVD` $\rightarrow$ `ESTABLISHED`, clone PCB khi nhận SYN, cấp phát ISN (Initial Sequence Number) động và quản lý hàng đợi kết nối backlog.
-* **Định thời truyền lại RTO (Jacobson/Karels, RFC 6298) & Exponential Backoff:** Theo dõi Round-Trip Time (RTT), tính Smoothed RTT ($SRTT$) và biến thiên ($RTTVAR$). Khi xảy ra quá hạn (Timeout) mà chưa nhận được ACK tương ứng trong `retransmit_q`, kích hoạt truyền lại segment đầu hàng đợi và nhân đôi RTO (`rto = min(rto * 2, 2000)`).
-* **Điều khiển luồng Sliding Window:** Giới hạn số lượng segment "in-flight" (chưa được ACK) không vượt quá dung tích Receive Window của đối phương và giới hạn hàng đợi kernel, tự động đưa process vào trạng thái ngủ khi nghẽn và đánh thức khi có ACK mới.
+### a. Thuật toán triển khai
+* **Ghép nối gói lệch thứ tự (`ooo_queue`):** Khi nhận segment có `seq > rcv_nxt`, chèn vào `ooo_queue` theo thứ tự sequence tăng dần (tối đa 16 gói). Khi nhận được gói lấp chỗ trống (`seq == rcv_nxt`), kernel duyệt qua danh sách xả các đoạn dữ liệu liên tục lên socket, cập nhật `rcv_nxt` và gửi Cumulative ACK.
+* **Tạo gói RST (RFC 793 Page 36):** Nếu gói đến có cờ ACK thì gửi RST với `seq = in_ack`. Nếu gói đến không có ACK thì gửi RST với `seq = 0`, `ack = in_seq + in_datalen + 1`, bật cờ RST|ACK.
+* **ARP Cache Aging:** Ghi nhận `last_seen_tick` cho từng entry. Cứ 1 giây (10 tick), hàm `arp_age_tick` kiểm tra: nếu entry không dùng quá 60 giây thì xóa; nếu entry đang chờ reply quá 5 giây thì hủy và free toàn bộ mbuf trong `pending_queue`.
+* **Thu hồi tài nguyên socket an toàn:** Khi gọi `sock_close`, lập tức ngắt con trỏ `pcb->sock = 0` để các sự kiện mạng sau đó không truy cập vào socket đã giải phóng; đóng tất cả socket con chưa accept trong `backlog_q`.
 
-### b. Source code enhanced and/or revised
-* **Khởi tạo và cấu hình phần cứng mạng:** Hiện thực mới hoàn toàn các file `kernel/e1000.c`, `kernel/e1000_dev.h`, `kernel/mbuf.c` để quản lý I/O bộ nhớ và DMA ring.
-* **Xử lý giao thức mạng L2/L3:** Hiện thực mới `kernel/eth.c`, `kernel/arp.c`, `kernel/ip.c`, `kernel/checksum.c`.
-* **Giao thức L4 và Socket Interface:** Hiện thực `kernel/tcp.c`, `kernel/tcp_input.c`, `kernel/tcp_output.c`, `kernel/tcp_timer.c`, `kernel/ringbuf.c`, `kernel/sock.c`, `kernel/sysnet.c`.
-* **Tích hợp Kernel Core:**
-  - Sửa `kernel/file.h`, `kernel/file.c`, `kernel/sysfile.c` để bổ sung kiểu tệp `FD_SOCK`, định tuyến các lời gọi `read()` và `write()` sang socket layer (`sock_read()`, `sock_write()`).
-  - Cập nhật `kernel/syscall.h`, `kernel/syscall.c` bổ sung các mã system call: `SYS_socket`, `SYS_bind`, `SYS_listen`, `SYS_accept`, `SYS_connect`.
-  - Cập nhật `kernel/main.c`, `kernel/trap.c` để gọi khởi tạo mạng `pci_init()` và bắt ngắt thiết bị E1000.
-* **User-space:** Viết daemon `user/httpd.c` lắng nghe cổng 80, bóc tách `GET /path HTTP/1.0`, mở tệp và gửi trả HTTP Response cùng dữ liệu.
+### b. Các tệp mã nguồn chỉnh sửa
+* `kernel/net.h`: Thêm trường `seq` vào `struct mbuf`, con trỏ `ooo_queue` vào `struct tcp_pcb`, khai báo `tcp_send_rst()`, `arp_age_tick()`.
+* `kernel/tcp_input.c`: Thêm logic chèn gói out-of-order, xả dữ liệu tích lũy và gửi RST khi không tìm thấy PCB.
+* `kernel/tcp_output.c`: Thêm hàm `tcp_send_rst()`.
+* `kernel/tcp.c`: Quản lý giải phóng `ooo_queue` và thu hồi PCB sau `TIME_WAIT`.
+* `kernel/sock.c`: Sửa `sock_close()`, `sock_read()`, `sock_write()`.
+* `kernel/e1000.c`: Đổi loss mặc định về 0%, thêm hàm đọc/ghi `packet_loss_rate`.
+* `kernel/arp.c`: Thêm `last_seen_tick`, `arp_age_tick()`, `arp_drop_pending()`.
+* `kernel/trap.c`: Gọi `arp_age_tick()` trong ngắt timer.
+* `kernel/sysnet.c`, `kernel/syscall.h`, `kernel/syscall.c`: Đăng ký 2 syscall `set_loss_rate` và `get_loss_rate`.
+* `user/setloss.c`: Viết tiện ích dòng lệnh `setloss`.
+* `user/httpd.c`: Đọc file thật `largefile.bin` từ đĩa, tinh giản log.
+* `tests/state_tests.py`: Viết script test 6 ca trạng thái TCP.
+* `tests/run_tests.py`: Viết script chạy QEMU và test tự động.
 
-### c. Testing result
-* **Kiểm thử biên dịch và khởi động:** Hệ điều hành xv6 biên dịch sạch sẽ (`make clean && make -j$(nproc)`), QEMU khởi chạy nhận diện thành công thiết bị PCI Intel E1000 (`vendor/dev=0x8086/0x100e`) và bật ngắt mạng bình thường.
-* **Kiểm thử HTTP GET văn bản tĩnh:** Khởi chạy `httpd` trên xv6, từ máy host thực hiện `curl -v http://127.0.0.1:20080/README`, server phản hồi mã `HTTP/1.0 200 OK` và nội dung file README chính xác 100%.
-* **Kiểm thử độ tin cậy tải file 1 MB dưới điều kiện rớt gói 10%:**
-  - Kích hoạt mô phỏng drop gói 10% tại E1000 transmit.
-  - Chạy `curl --max-time 60 http://127.0.0.1:20080/file1mb -o downloaded_1mb.bin`. Tệp 1 MB (1,048,576 bytes) được truyền tải trọn vẹn, cơ chế truyền lại TCP xử lý thành công tất cả các gói bị mất.
-  - So khớp mã băm SHA-256 với tệp kỳ vọng `expected_1mb.bin`: Cả 2 file đều đạt mã băm `c4e1ab33a4d2f0d7be4e6be6c387096da51a28bad003f71309bb774f75139111`, chứng minh tầng TCP truyền nhận dữ liệu tin cậy tuyệt đối, không mất mát, không xáo trộn thứ tự.
+### c. Kết quả kiểm thử
+* **Chạy test tự động (`python3 tests/run_tests.py`):**
+  ```text
+  test_3way_handshake          ... OK
+  test_closed_port_rst         ... OK
+  test_half_close              ... OK
+  test_fragmented_stream       ... OK
+  test_largefile_1mb           ... OK
+  test_client_abort            ... OK
+
+  All 6 tests passed.
+  ```
+* **Test tải file 1 MB thật từ đĩa:**
+  - Chạy `curl http://127.0.0.1:20080/largefile.bin -o dl.bin` hoàn thành trong ~1.3 giây, tốc độ ~750 KB/s.
+  - So khớp mã băm SHA-256 giữa file tải về và file gốc trên đĩa: trùng khớp 100%.
+* **Test ngắt kết nối đột ngột (RST):**
+  - Client gửi dở request rồi đóng bằng RST (SO_LINGER=0). Server đóng socket giải phóng tài nguyên và phục vụ ngay request của client tiếp theo bình thường.
 
 ---
 
 ## TODO
 
-### a) List of remaining issues
-1. **Lỗi Deadlock mbuf khi tải liên tục:** Hàm `mbuffree()` chưa gọi `wakeup()`, khi toàn bộ 128 `mbuf` bị giữ bởi `retransmit_q`, tiến trình `sock_write()` có thể bị sleep vĩnh viễn nếu không có cơ chế timeout/reclaim an toàn.
-2. **Metadata `seq_end` đang lưu vào mảng dữ liệu:** Cần trường riêng trong `struct mbuf` thay vì ghi đè vào 4 byte đầu của `buf`.
-3. **Tỉ lệ rớt gói bị hardcode:** Tỉ lệ rớt gói 10% đang cố định trong code C của `kernel/e1000.c`, cần mở rộng thành syscall cấu hình động từ user-space.
-4. **Giới hạn tệp tin xv6 chỉ ~268 KB:** Web Server hiện phục vụ `/file1mb` bằng luồng thuật toán sinh byte ảo; hệ thống tệp xv6 chưa hỗ trợ Doubly-Indirect block nên chưa thể lưu file 1 MB thật trên đĩa.
-5. **Kịch bản kiểm thử regression:** Script `test-xv6.py usertests` gặp lỗi BrokenPipe do cấu hình môi trường QEMU chuyển tiếp cổng mạng.
+### a) Vấn đề còn tồn đọng
+1. **Chưa có kiểm soát tắc nghẽn:** Receive window đang cố định ở 4096 bytes, chưa có thuật toán điều chỉnh cửa sổ nghẽn (`cwnd`) khi mạng bị rớt gói nhiều.
+2. **Web server đơn tiến trình:** Server xử lý tuần tự từng kết nối, khi đang gửi file 1 MB thì các request khác phải chờ.
+3. **Chưa có công cụ xem kết nối mạng:** Chưa có lệnh tương tự `netstat` để xem danh sách PCB và trạng thái kết nối từ shell xv6.
 
-### b) List of tasks to carry out in the next period (Tuần 2)
-* **Task 1 (Hoàng):** Khắc phục triệt để nguy cơ Deadlock mbuf bằng cách bổ sung `wakeup(&mbuf_pool)` trong `mbuffree()` và cài đặt `mbufalloc_wait()`. Bổ sung trường `seq_end` vào `struct mbuf`.
-* **Task 2 (Hoàng):** Cài đặt 2 system call `set_loss_rate(int)` và `get_loss_rate()` cùng chương trình `user/setloss` để điều chỉnh linh hoạt tỉ lệ rớt gói lúc chạy. Chuẩn hóa RTO Timer về tần số 10 Hz.
-* **Task 3 (Hiệp):** Nâng cấp Inode trong `kernel/fs.h` và `kernel/fs.c` sang kiến trúc Doubly-Indirect Block (11 direct + 1 single + 1 double-indirect), nâng trần file lên ~65.8 MB; đồng bộ công cụ `mkfs/mkfs.c`.
-* **Task 4 (Đức + Hiệp):** Tạo tệp 1 MB thật trên đĩa xv6, cập nhật `user/httpd.c` đọc trực tiếp từ đĩa bằng `open()` và `read()` thay cho sinh dữ liệu ảo.
-* **Task 5 (Cả nhóm):** Thực hiện đo đạc benchmark so sánh hiệu năng truyền tải giữa các mức tỉ lệ rớt gói (0%, 5%, 10%, 20%) và hoàn thiện báo cáo tuần 2.
+### b) Kế hoạch Tuần 3
+* **Hoàng:** Cài đặt thuật toán kiểm soát tắc nghẽn TCP Reno (Slow Start, Congestion Avoidance, Fast Retransmit/Fast Recovery) và quy tắc Karn khi đo RTT.
+* **Hiệp:** Viết syscall `sys_netstat` trong `kernel/sysnet.c` và lệnh `user/netstat.c` để in bảng trạng thái kết nối TCP ra màn hình.
+* **Đức:** Nâng cấp bộ đệm vòng trong `kernel/ringbuf.c` cho an toàn đa luồng và nghiên cứu mô hình worker pool (fork) cho `user/httpd.c`.
+* **Cả nhóm:** Đo kiểm throughput/latency ở các mức loss khác nhau và hoàn thiện báo cáo tuần 3.
 
 ### c) Milestone
-**Milestone tiếp theo (Kết thúc Giai đoạn 2 & Giai đoạn 3):** Toàn bộ ngăn xếp mạng hoạt động ổn định không xảy ra hiện tượng cạn kiệt bộ đệm (0 Deadlock), tỉ lệ rớt gói có thể cấu hình động qua lệnh `setloss`, và Web Server có khả năng phân phối tệp nhị phân 1 MB thật được lưu trữ trực tiếp trên đĩa xv6 với mã băm SHA-256 trùng khớp 100%.
+Kết thúc Tuần 3: Ngăn xếp TCP có kiểm soát tắc nghẽn TCP Reno, có lệnh `netstat` theo dõi kết nối và web server bắt đầu hỗ trợ xử lý nhiều kết nối.
 
 ---
 
-## Minh chứng kết quả thực nghiệm và quản lý công việc
+## Minh chứng kết quả thực nghiệm
 
-### 1. Kết quả thực nghiệm của thành viên Lê Anh Đức (image_duc)
+### 1. Kết quả thực nghiệm của Lê Anh Đức
 
-#### a. Khởi động xv6, nạp Driver E1000 và chạy Web Server HTTP/1.0
-Kernel nhận diện thành công card mạng PCI E1000 (`vendor/dev=0x100e8086`), cấu hình DMA Ring và tiến trình `httpd` lắng nghe tại port 80:
+* **Chạy bộ kiểm thử tự động máy trạng thái TCP (`tests/run_tests.py`):**
+  - Chạy lệnh `python3 tests/run_tests.py` từ máy Host để kiểm tra tự động 6 kịch bản trạng thái FSM, ngắt kết nối (RST/FIN) và tải file 1 MB thật từ đĩa.
+  - Toàn bộ 6/6 bài test đều đạt kết quả `OK`.
 
-![Khởi động xv6 và chạy httpd](image_duc/Screenshot%20from%202026-10-24%2018-11-20.png)
-
-#### b. Kiểm thử gửi HTTP Request lấy file tĩnh (`/README`) từ Host
-Gửi request qua `curl -v http://127.0.0.1:20080/README`, server phản hồi HTTP/1.0 200 OK và in toàn bộ nội dung file README của dự án:
-
-![HTTP GET /README thành công](image_duc/Screenshot%20from%202026-10-24%2018-12-01.png)
-
-#### c. Kiểm thử truyền tải tệp 1 MB (`/file1mb`) với bộ lọc rớt gói 10%
-Thực hiện tải file 1,048,576 bytes từ guest xv6 về Host Linux thông qua `curl` dưới điều kiện card mạng liên tục drop ngẫu nhiên 10% gói IP/TCP:
-
-![Tải thành công file 1MB](image_duc/Screenshot%20from%202026-10-24%2018-13-16.png)
-
-#### d. Xác thực tính toàn vẹn dữ liệu bằng mã băm SHA-256
-Tạo file kỳ vọng `expected_1mb.bin` và so sánh mã băm SHA-256 của file tải về: Cả hai mã băm trùng khớp tuyệt đối (`c4e1ab33a4d2f0d7be4e6be6c387096da51a28bad003f71309bb774f75139111`), khẳng định tầng TCP kiểm soát luồng và truyền lại gói tin chính xác 100%:
-
-![So khớp mã băm SHA-256 khớp 100%](image_duc/Screenshot%20from%202026-10-24%2018-13-52.png)
-
-#### e. Kiểm tra Regression Tests với `test-xv6.py usertests`
-Ghi nhận kết quả thực thi script kiểm thử hồi quy `test-xv6.py usertests` trên môi trường:
-
-![Kết quả chạy test-xv6.py](image_duc/Screenshot%20from%202026-10-24%2018-14-59.png)
+![Kiểm thử tự động FSM của Lê Anh Đức](image_duc/image.png)
 
 ---
 
-### 2. Kết quả kiểm thử và đóng góp của thành viên Phùng Huy Hoàng
-[bo sung anh]
+### 2. Kết quả kiểm thử của Phùng Huy Hoàng
+
+* **Biên dịch kernel & tiện ích `user/setloss`, khởi chạy xv6 và nạp `httpd`:**
+  - Biên dịch hoàn tất kernel và tiện ích người dùng `setloss` vào đĩa `fs.img`.
+  - Khởi động xv6 trong QEMU, card mạng Intel E1000 nhận diện và gán địa chỉ MAC thành công.
+  - Khởi chạy `httpd` ở user-space lắng nghe cổng 80.
+* **Đo kiểm tải file 1 MB qua curl và so khớp mã băm SHA-256:**
+  - Từ host Linux chạy: `curl --max-time 60 http://127.0.0.1:20080/file1mb -o downloaded.bin` (hoàn thành trong 4 giây, tốc độ ~246 KB/s).
+  - Chạy `sha256sum downloaded.bin expected.bin`: Cả hai file đều cho mã băm trùng khớp, dữ liệu tải về nguyên vẹn.
+
+![Kiểm thử của Phùng Huy Hoàng](image_doang/image.png)
 
 ---
 
-### 3. Kết quả kiểm thử và đóng góp của thành viên Nguyễn Vũ Hiệp
-[bo sung anh]
+### 3. Kết quả kiểm thử của Nguyễn Vũ Hiệp
+
+* **Sửa đổi hệ thống tệp và khởi động server (terminal trái):**
+  - Mở và cập nhật cấu trúc `dinode` trong `kernel/fs.h`, `kernel/file.h` và hàm `bmap()` trong `kernel/fs.c` hỗ trợ con trỏ Doubly-Indirect.
+  - Boot xv6 trên QEMU, chạy `httpd` phục vụ file tĩnh `largefile.bin`.
+* **Tải file 1 MB thật từ đĩa và đối chứng mã băm SHA-256 tự động (terminal phải):**
+  - Từ host Linux chạy `curl -v http://127.0.0.1:20080/largefile.bin -o dl.bin`: Server phản hồi `HTTP/1.0 200 OK`, tải hoàn tất 1.00 MB dữ liệu thật đọc từ đĩa trong 4 giây (tốc độ ~237.7 KB/s).
+  - Script kiểm tra mã băm giữa `dl.bin` vừa tải và `user/largefile.bin` gốc trên đĩa: Shell in ra thông báo `TRÙNG KHỚP 100% (Dữ liệu toàn vẹn)`.
+
+![Kiểm thử của Nguyễn Vũ Hiệp](image_hiep/image.png)
 
 ---
 
-### 4. Bảng quản lý tiến độ công việc trên Trello
-[bo sung anh]
+### 4. Bảng quản lý tiến độ trên Trello
+[Bổ sung ảnh Trello]
