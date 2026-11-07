@@ -66,10 +66,18 @@ tcp_handle_ack(struct tcp_pcb *pcb, uint32 ack, uint16 win)
   if ((int32)(ack - pcb->snd_una) > 0) {
     // giai phong segment da duoc ack
     struct mbuf **pq = &pcb->retransmit_q;
+    int have_sample = 0;
+    uint32 sample_ms = 0;
     while (*pq) {
       uint32 seg_end = (*pq)->seq_end;
       if ((int32)(ack - seg_end) >= 0) {
         struct mbuf *done = *pq;
+        // karn: chi lay mau rtt tu segment chua tung gui lai
+        if (!done->retransmitted) {
+          uint32 dt = ticks - done->send_tick;
+          sample_ms = (dt ? dt : 1) * 100;
+          have_sample = 1;
+        }
         *pq = done->next;
         done->next = 0;
         mbuffree(done);
@@ -80,7 +88,10 @@ tcp_handle_ack(struct tcp_pcb *pcb, uint32 ack, uint16 win)
     pcb->snd_una = ack;
     pcb->dup_acks = 0;
     pcb->backoff = 0;
-    pcb->rto = 200; // reset ve baseline rto
+    if (have_sample)
+      tcp_update_rto(pcb, sample_ms); // cap nhat srtt/rttvar/rto
+    else
+      tcp_recalc_rto(pcb); // karn: khong co mau moi, tinh lai rto tu srtt/rttvar, bo backoff
     if (pcb->retransmit_q) {
       uint32 t = pcb->rto / 100;
       pcb->rto_deadline = ticks + (t ? t : 1);
@@ -93,6 +104,7 @@ tcp_handle_ack(struct tcp_pcb *pcb, uint32 ack, uint16 win)
     if (pcb->dup_acks == 3) {
       // fast retransmit khi nhan du 3 dup acks
       struct mbuf *m = pcb->retransmit_q;
+      m->retransmitted = 1;
       struct mbuf *copy = mbufalloc(MBUF_DEFAULT_HEAD);
       if (copy) {
         char *dst = mbufput(copy, m->len);

@@ -23,6 +23,8 @@ mbuf_clone_for_retransmit(struct mbuf *m, uint32 seq_end)
   memmove(dst, m->head, m->len);
 
   clone->seq_end = seq_end;
+  clone->retransmitted = 0;
+  clone->send_tick = ticks;
   return clone;
 }
 

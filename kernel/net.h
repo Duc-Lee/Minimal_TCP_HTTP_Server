@@ -95,6 +95,14 @@ struct tcphdr {
 #define MBUF_SIZE         2048
 #define MBUF_DEFAULT_HEAD 128
 
+// tham so rto / circuit breaker
+#define RTO_MIN      200   // ms
+#define RTO_MAX      2000  // ms
+#define MAX_BACKOFF  12    // so lan truyen lai lien tiep toi da
+#ifndef ECONNRESET
+#define ECONNRESET   104
+#endif
+
 // bo dem goi tin mbuf
 struct mbuf {
   struct mbuf *next;           // moc noi vao queue
@@ -103,6 +111,8 @@ struct mbuf {
   int          ref_cnt;        // dem tham chieu
   uint32       seq;            // metadata: sequence bat dau cua segment
   uint32       seq_end;        // metadata: sequence ket thuc cua segment
+  int          retransmitted;  // karn: 1 neu segment da bi gui lai (khong dung de do rtt)
+  uint32       send_tick;      // tick luc gui lan dau, dung do rtt
   char         buf[MBUF_SIZE]; // vung dem chua du lieu
 };
 
@@ -190,6 +200,7 @@ struct tcp_pcb {
   uint32 rttvar;
   uint32 rto;
   int backoff;
+  int conn_err;   // loi ket noi (ECONNRESET) khi circuit breaker kich hoat
   uint32 rto_deadline;
   uint32 dup_acks; // dem duplicate ack de fast retransmit
 
@@ -205,6 +216,7 @@ void tcp_pcb_set_listen(struct tcp_pcb *pcb);
 struct tcp_pcb *tcp_lookup(uint32 src_ip, uint16 src_port, uint32 dst_ip,
                            uint16 dst_port);
 void tcp_update_rto(struct tcp_pcb *pcb, uint32 rtt_msec);
+void tcp_recalc_rto(struct tcp_pcb *pcb);
 
 void tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip);
 int tcp_output(struct tcp_pcb *pcb, struct mbuf *m, uint8 flags);

@@ -67,6 +67,7 @@ tcp_pcb_alloc(void)
     pcb->rttvar = 0;
     pcb->rto = 200; // rto khoi tao 200ms cho qemu lan
     pcb->backoff = 0;
+    pcb->conn_err = 0;
     pcb->dup_acks = 0;
     pcb->retransmit_q = 0;
     pcb->ooo_queue = 0;
@@ -223,12 +224,24 @@ tcp_timer_process(void)
 
       // exponential backoff
       pcb->backoff++;
+      m->retransmitted = 1; // karn: khong lay mau rtt tu segment nay
       pcb->rto = pcb->rto * 2;
-      if (pcb->rto > 2000)
-        pcb->rto = 2000;
+      if (pcb->rto > RTO_MAX)
+        pcb->rto = RTO_MAX;
       pcb->rto_deadline = ticks + (pcb->rto / 100 ? pcb->rto / 100 : 1);
 
-      if (pcb->backoff > 12) {
+      if (pcb->backoff > MAX_BACKOFF) {
+        // circuit breaker: huy ket noi, giai phong retransmit queue
+        struct mbuf *p = pcb->retransmit_q;
+        while (p) {
+          struct mbuf *next = p->next;
+          p->next = 0;
+          mbuffree(p);
+          p = next;
+        }
+        pcb->retransmit_q = 0;
+        pcb->rto_deadline = 0;
+        pcb->conn_err = ECONNRESET;
         pcb->state = TCP_CLOSED;
         wakeup(pcb);
         if (pcb->sock)

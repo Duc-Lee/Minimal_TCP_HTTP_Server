@@ -44,6 +44,8 @@ mbufalloc(unsigned int headroom)
     m->ref_cnt = 1;
     m->seq = 0;
     m->seq_end = 0;
+    m->retransmitted = 0;
+    m->send_tick = 0;
     m->head = m->buf + headroom;
     m->len = 0;
   }
