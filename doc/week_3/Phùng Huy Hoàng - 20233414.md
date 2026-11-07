@@ -12,7 +12,7 @@
 Theo kế hoạch tổng thể Tuần 3:
 1. **Triển khai động cơ Kiểm soát tắc nghẽn công nghiệp TCP Reno (RFC 5681):**
    - Hiện thực 4 pha kinh điển: **Slow Start (SS)**, **Congestion Avoidance (CA)**, **Fast Retransmit** (khi nhận đủ 3 Duplicate ACKs) và **Fast Recovery** (Window Inflation / Deflation).
-   - Tự động điều tiết lượng dữ liệu in-flight trong mạng tuân thủ cửa sổ kép: $W = \min(snd\_wnd, cwnd)$.
+   - Tự động điều tiết lượng dữ liệu in-flight trong mạng tuân thủ cửa sổ kép: `W = min(snd_wnd, cwnd)`.
 2. **Tiếp nhận bàn giao và chuẩn hóa Máy trạng thái TCP FSM:**
    - Xử lý các lỗi lệch trạng thái tại `TCP_FIN_WAIT_1`, `TCP_LAST_ACK` và `TCP_CLOSING` do bạn Nguyễn Vũ Hiệp (TV1) phát hiện và ghi nhận ở mục 4.4 báo cáo Tuần 3.
    - Đảm bảo hàng đợi `retransmit_q` luôn được dọn dẹp sạch sẽ qua `tcp_handle_ack()` ở mọi trạng thái đóng kết nối.
@@ -86,34 +86,37 @@ Thuật toán gồm các hàm nghiệp vụ chính:
 
 1. **Khởi tạo (`tcp_cc_init`)**:
    - Thiết lập cửa sổ ban đầu: `cwnd = 16 * TCP_MSS` (22.4 KB) nhằm tận dụng tốt băng thông mạng LAN ảo của QEMU.
-   - Ngưỡng chuyển pha: `ssthresh = 65535` bytes.
+   - Ngưỡng chuyển pha ban đầu: `ssthresh = 65535` bytes.
 2. **Tiếp nhận ACK mới (`tcp_cc_on_ack`)**:
-   - Nếu đang trong **Fast Recovery** (`dupack_cnt >= 3`): Nhận được ACK cho dữ liệu mới báo hiệu bên nhận đã thoát khỏi lỗ thủng sequence. Thực hiện xả phồng cửa sổ (**Deflate Window**):
-     $$\text{cwnd} \leftarrow \text{ssthresh}$$
-     Đồng thời đặt lại `dupack_cnt = 0` để quay về pha Congestion Avoidance.
+   - Nếu đang trong **Fast Recovery** (`dupack_cnt >= 3`):
+     * Nếu nhận **Partial ACK** (`ack < recover`): Gói tiếp theo trong cửa sổ cũng bị mất, lập tức gọi `tcp_fast_retransmit(pcb)` để cứu gói thiếu tiếp theo mà không chờ RTO timeout (200 ms).
+     * Nếu nhận **Full ACK** (`ack >= recover`): Toàn bộ dữ liệu trước khi vào Fast Recovery đã được ACK. Thực hiện xả phồng cửa sổ (**Deflate Window**):
+       - `cwnd = ssthresh`
+       - Đặt lại `dupack_cnt = 0` để quay về pha Congestion Avoidance.
    - Nếu trong điều kiện bình thường:
-     * **Pha Slow Start** ($\text{cwnd} < \text{ssthresh}$): Tăng hàm mũ theo RTT:
-       $$\text{cwnd} \leftarrow \text{cwnd} + \text{MSS}$$
-     * **Pha Congestion Avoidance** ($\text{cwnd} \ge \text{ssthresh}$): Tăng tuyến tính (Additive Increase):
-       $$\text{cwnd} \leftarrow \text{cwnd} + \left\lfloor\frac{\text{MSS} \times \text{MSS}}{\text{cwnd}}\right\rfloor$$
-     * Giới hạn an toàn trên: $\text{cwnd} \le 32 \times \text{MSS}$ (44.8 KB) để đảm bảo không làm cạn kiệt bộ đệm `mbuf` kernel (tổng 128 mbufs).
+     * **Pha Slow Start** (`cwnd < ssthresh`): Tăng hàm mũ theo RTT, mỗi khi nhận 1 ACK xác nhận dữ liệu mới:
+       - `cwnd = cwnd + TCP_MSS`
+     * **Pha Congestion Avoidance** (`cwnd >= ssthresh`): Tăng tuyến tính (Additive Increase):
+       - `cwnd = cwnd + (TCP_MSS * TCP_MSS) / cwnd`
+     * Giới hạn an toàn trên: `cwnd <= 32 * TCP_MSS` (44.8 KB) để đảm bảo không làm tràn bộ đệm `mbuf` kernel.
 3. **Tiếp nhận Duplicate ACK (`tcp_cc_on_dup_ack`)**:
-   - Tăng biến đếm `dupack_cnt++`.
-   - Khi nhận đúng **3 Duplicate ACKs** ($\text{dupack\_cnt} == 3$):
-     * Tính toán lượng dữ liệu đang bay: $\text{FlightSize} = \text{snd\_nxt} - \text{snd\_una}$.
+   - Tăng biến đếm: `dupack_cnt++`.
+   - Khi nhận đúng **3 Duplicate ACKs** (`dupack_cnt == 3`):
+     * Tính toán lượng dữ liệu đang bay: `FlightSize = snd_nxt - snd_una`.
      * Cắt giảm ngưỡng (Multiplicative Decrease):
-       $$\text{ssthresh} \leftarrow \max\left(\frac{\text{FlightSize}}{2}, 4 \times \text{MSS}\right)$$
-       $$\text{cwnd} \leftarrow \text{ssthresh} + 3 \times \text{MSS}$$
-       $$\text{recover} \leftarrow \text{snd\_nxt}$$
+       - `ssthresh = max(FlightSize / 2, 4 * TCP_MSS)`
+       - `cwnd = ssthresh + 3 * TCP_MSS`
+       - `recover = snd_nxt`
      * Kích hoạt **Fast Retransmit** gửi lại ngay lập tức segment đầu tiên trong `retransmit_q` mà không cần chờ RTO timeout (200 ms).
-   - Với mỗi Duplicate ACK tiếp theo ($\text{dupack\_cnt} > 3$):
+   - Với mỗi Duplicate ACK tiếp theo (`dupack_cnt > 3`):
      * Cửa sổ được thổi phồng (**Window Inflation**) thêm 1 MSS vì mỗi Duplicate ACK chứng minh một segment nữa đã rời khỏi đường truyền và nằm an toàn trong bộ đệm bên nhận:
-       $$\text{cwnd} \leftarrow \text{cwnd} + \text{MSS}$$
+       - `cwnd = cwnd + TCP_MSS`
 4. **Hết hạn bộ đếm thời gian RTO (`tcp_cc_on_timeout`)**:
    - Khi xảy ra timeout (mạng nghẽn nghiêm trọng, mất nhiều gói liên tiếp):
-     $$\text{ssthresh} \leftarrow \max\left(\frac{\text{FlightSize}}{2}, 4 \times \text{MSS}\right)$$
-     $$\text{cwnd} \leftarrow 2 \times \text{MSS}$$
-     $$\text{dupack\_cnt} \leftarrow 0$$
+     - `ssthresh = max(FlightSize / 2, 4 * TCP_MSS)`
+     - `cwnd = 4 * TCP_MSS`
+     - `dupack_cnt = 0`
+     - `recover = snd_nxt`
 
 ---
 
