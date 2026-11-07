@@ -27,3 +27,11 @@ compile_commands.json
 
 # Leftover folders
 xv6-riscv/
+# Python virtual environments & cache
+.venv/
+.venv
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo

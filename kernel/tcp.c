@@ -270,3 +270,74 @@ tcp_timer_process(void)
     release(&pcb->lock);
   }
 }
+
+// lay thong ke cac ket noi tcp dang hoat dong vao buffer
+int
+tcp_get_stats(struct tcp_stat *stats, int max_entries)
+{
+  if (!stats || max_entries <= 0)
+    return 0;
+
+  int count = 0;
+  acquire(&tcp_mgr.lock);
+  for (int i = 0; i < TCP_PCB_POOL_SIZE && count < max_entries; i++) {
+    struct tcp_pcb *pcb = &tcp_mgr.pcbs[i];
+    if (pcb->state == TCP_CLOSED)
+      continue;
+
+    acquire(&pcb->lock);
+    stats[count].local_ip = pcb->local_ip;
+    stats[count].local_port = pcb->local_port;
+    stats[count].remote_ip = pcb->remote_ip;
+    stats[count].remote_port = pcb->remote_port;
+    stats[count].state = (int)pcb->state;
+    stats[count].cwnd = pcb->cwnd;
+    stats[count].ssthresh = pcb->ssthresh;
+    stats[count].rtt = (pcb->srtt >> 3);
+    stats[count].rto = pcb->rto;
+    stats[count].snd_una = pcb->snd_una;
+    stats[count].snd_nxt = pcb->snd_nxt;
+    stats[count].snd_wnd = pcb->snd_wnd;
+    stats[count].rcv_wnd = pcb->rcv_wnd;
+    stats[count].dupack_cnt = pcb->dupack_cnt;
+    stats[count].backoff = pcb->backoff;
+    release(&pcb->lock);
+
+    count++;
+  }
+  release(&tcp_mgr.lock);
+
+  return count;
+}
+
+// in danh sach va trang thai cac ket noi tcp ra console kernel
+void
+tcp_dump_stats(void)
+{
+  static const char *st_names[] = {
+    "CLOSED", "LISTEN", "SYN_SENT", "SYN_RCVD",
+    "ESTAB", "FIN_WAIT_1", "FIN_WAIT_2",
+    "CLOSE_WAIT", "CLOSING", "LAST_ACK", "TIME_WAIT"
+  };
+
+  acquire(&tcp_mgr.lock);
+  for (int i = 0; i < TCP_PCB_POOL_SIZE; i++) {
+    struct tcp_pcb *pcb = &tcp_mgr.pcbs[i];
+    if (pcb->state == TCP_CLOSED)
+      continue;
+
+    acquire(&pcb->lock);
+    const char *st = (pcb->state >= 0 && pcb->state <= TCP_TIME_WAIT)
+                     ? st_names[pcb->state] : "???";
+
+    printk("tcp[%d]: %s %d.%d.%d.%d:%d -> %d.%d.%d.%d:%d cwnd=%d ssthresh=%d rtt=%d rto=%d\n",
+           i, st,
+           (pcb->local_ip >> 24) & 0xff, (pcb->local_ip >> 16) & 0xff,
+           (pcb->local_ip >> 8) & 0xff, pcb->local_ip & 0xff, pcb->local_port,
+           (pcb->remote_ip >> 24) & 0xff, (pcb->remote_ip >> 16) & 0xff,
+           (pcb->remote_ip >> 8) & 0xff, pcb->remote_ip & 0xff, pcb->remote_port,
+           pcb->cwnd, pcb->ssthresh, pcb->srtt >> 3, pcb->rto);
+    release(&pcb->lock);
+  }
+  release(&tcp_mgr.lock);
+}

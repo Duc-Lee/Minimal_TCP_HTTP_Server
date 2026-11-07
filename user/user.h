@@ -7,6 +7,27 @@
 
 struct stat;
 
+#ifndef _STRUCT_TCP_STAT_
+#define _STRUCT_TCP_STAT_
+struct tcp_stat {
+  uint32 local_ip;
+  uint16 local_port;
+  uint32 remote_ip;
+  uint16 remote_port;
+  int    state;
+  uint32 cwnd;
+  uint32 ssthresh;
+  uint32 rtt;
+  uint32 rto;
+  uint32 snd_una;
+  uint32 snd_nxt;
+  uint32 snd_wnd;
+  uint32 rcv_wnd;
+  uint32 dupack_cnt;
+  int    backoff;
+};
+#endif
+
 // system calls
 int fork(void);
 int exit(int) __attribute__((noreturn));
@@ -37,6 +58,7 @@ int accept(int sockfd);
 int connect(int sockfd, int ip, int port);
 int set_loss_rate(int rate);
 int get_loss_rate(void);
+int netstat(void *buf, int max_entries);
 
 #define AF_INET     2
 #define SOCK_STREAM 1

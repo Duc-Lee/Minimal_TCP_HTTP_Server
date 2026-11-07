@@ -10,6 +10,14 @@
 // Gioi han cwnd toi da de tranh tran mbuf pool trong xv6 (128 mbufs tong cong)
 #define MAX_CWND (32 * TCP_MSS)
 
+// in trace cwnd cho script plot_cwnd.py tren host
+static inline void
+tcp_cc_trace(struct tcp_pcb *pcb, const char *ev)
+{
+  printk("cwnd: t=%d %s cwnd=%d ssthresh=%d\n",
+         ticks, ev, pcb->cwnd, pcb->ssthresh);
+}
+
 // Khoi tao cac thong so kiem soat tac nghen cho PCB
 void
 tcp_cc_init(struct tcp_pcb *pcb)
@@ -18,6 +26,7 @@ tcp_cc_init(struct tcp_pcb *pcb)
   pcb->ssthresh = 65535;         // Slow start threshold ban dau
   pcb->dupack_cnt = 0;
   pcb->recover = 0;
+  tcp_cc_trace(pcb, "INIT");
 }
 
 // Truyen lai nhanh segment dau hang doi retransmit_q
@@ -49,6 +58,8 @@ tcp_fast_retransmit(struct tcp_pcb *pcb)
 void
 tcp_cc_on_ack(struct tcp_pcb *pcb, uint32 ack)
 {
+  uint32 old_cwnd = pcb->cwnd;
+
   if (pcb->dupack_cnt >= 3) {
     if ((int32)(ack - pcb->recover) < 0) {
       // RFC 6582 (NewReno): Partial ACK!
@@ -59,6 +70,7 @@ tcp_cc_on_ack(struct tcp_pcb *pcb, uint32 ack)
       pcb->cwnd = pcb->ssthresh + 3 * TCP_MSS;
       uint32 t = pcb->rto / 100;
       pcb->rto_deadline = ticks + (t ? t : 1);
+      tcp_cc_trace(pcb, "PARTIAL_ACK");
       wakeup(pcb);
       return;
     } else {
@@ -66,6 +78,7 @@ tcp_cc_on_ack(struct tcp_pcb *pcb, uint32 ack)
       // Thoat Fast Recovery, deflate cua so ve ssthresh
       pcb->cwnd = pcb->ssthresh;
       pcb->dupack_cnt = 0;
+      tcp_cc_trace(pcb, "RECOVERY_EXIT");
     }
   } else {
     pcb->dupack_cnt = 0;
@@ -84,6 +97,10 @@ tcp_cc_on_ack(struct tcp_pcb *pcb, uint32 ack)
 
   if (pcb->cwnd > MAX_CWND)
     pcb->cwnd = MAX_CWND;
+
+  if ((pcb->cwnd / TCP_MSS) != (old_cwnd / TCP_MSS)) {
+    tcp_cc_trace(pcb, (pcb->cwnd < pcb->ssthresh) ? "SLOW_START" : "CONGESTION_AVOIDANCE");
+  }
 }
 
 // Xu ly khi nhan duoc Duplicate ACK (ack == snd_una)
@@ -105,6 +122,7 @@ tcp_cc_on_dup_ack(struct tcp_pcb *pcb, uint32 ack)
 
     // Gui lai ngay lap tuc goi tin bi thieu dau tien
     tcp_fast_retransmit(pcb);
+    tcp_cc_trace(pcb, "FAST_RETRANSMIT");
     wakeup(pcb);
   } else if (pcb->dupack_cnt > 3) {
     // Fast Recovery (Window Inflation):
@@ -128,4 +146,5 @@ tcp_cc_on_timeout(struct tcp_pcb *pcb)
   pcb->cwnd = 4 * TCP_MSS;
   pcb->dupack_cnt = 0;
   pcb->recover = pcb->snd_nxt;
+  tcp_cc_trace(pcb, "TIMEOUT");
 }

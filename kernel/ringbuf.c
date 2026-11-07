@@ -7,6 +7,7 @@
 #include "spinlock.h"
 #include "net.h"
 
+// khoi tao ring buffer voi spinlock
 void
 ringbuf_init(struct ringbuf *rb)
 {
@@ -39,34 +40,46 @@ ringbuf_free_space(struct ringbuf *rb)
   return free_bytes;
 }
 
-// ghi vao ring buffer, day thi sleep cho doc bot
+// ghi vao ring buffer voi memmove toi uu, an toan spinlock
 int
 ringbuf_write(struct ringbuf *rb, const char *data, int len)
 {
+  if (!rb || !data || len <= 0)
+    return 0;
+
   int written = 0;
 
   acquire(&rb->lock);
   while (written < len) {
-    while (rb->count == RINGBUF_SIZE) {
-      // day roi thi sleep cho doc
-      sleep_prepare(rb);
-      release(&rb->lock);
-      sleep();
-      acquire(&rb->lock);
+    int space = RINGBUF_SIZE - rb->count;
+    if (space <= 0) {
+      // buffer day, danh thuc nguoi doc va thoat de tranh deadlock interrupt
+      wakeup(rb);
+      break;
     }
 
-    int space = RINGBUF_SIZE - rb->count;
     int to_write = len - written;
     if (to_write > space)
       to_write = space;
 
-    for (int i = 0; i < to_write; i++) {
-      rb->buf[rb->head] = data[written++];
-      rb->head = (rb->head + 1) % RINGBUF_SIZE;
-      rb->count++;
+    // copy thanh tung block lien tuc bang memmove thay vi vong lap tung byte
+    int first = RINGBUF_SIZE - rb->head;
+    if (first > to_write)
+      first = to_write;
+
+    memmove(&rb->buf[rb->head], &data[written], first);
+    rb->head = (rb->head + first) & (RINGBUF_SIZE - 1);
+
+    int second = to_write - first;
+    if (second > 0) {
+      memmove(&rb->buf[rb->head], &data[written + first], second);
+      rb->head = (rb->head + second) & (RINGBUF_SIZE - 1);
     }
 
-    // bao cho ben doc day
+    rb->count += to_write;
+    written += to_write;
+
+    // danh thuc tien trinh dang cho doc
     wakeup(rb);
   }
   release(&rb->lock);
@@ -74,11 +87,12 @@ ringbuf_write(struct ringbuf *rb, const char *data, int len)
   return written;
 }
 
-// doc tu ring buffer, rong thi sleep cho den khi co data hoac eof
+// doc du lieu tu ring buffer, ho tro sleep/wakeup va toi uu memmove
 int
 ringbuf_read(struct ringbuf *rb, char *data, int len)
 {
-  int read_bytes = 0;
+  if (!rb || !data || len <= 0)
+    return 0;
 
   acquire(&rb->lock);
   while (rb->count == 0) {
@@ -86,7 +100,7 @@ ringbuf_read(struct ringbuf *rb, char *data, int len)
       release(&rb->lock);
       return 0; // da nhan fin hoac dong ket noi
     }
-    // chua co data thi sleep cho
+    // chua co data thi sleep cho den khi co data hoac eof
     sleep_prepare(rb);
     release(&rb->lock);
     sleep();
@@ -97,15 +111,25 @@ ringbuf_read(struct ringbuf *rb, char *data, int len)
   if (to_read > rb->count)
     to_read = rb->count;
 
-  for (int i = 0; i < to_read; i++) {
-    data[read_bytes++] = rb->buf[rb->tail];
-    rb->tail = (rb->tail + 1) % RINGBUF_SIZE;
-    rb->count--;
+  // copy thanh tung block lien tuc bang memmove
+  int first = RINGBUF_SIZE - rb->tail;
+  if (first > to_read)
+    first = to_read;
+
+  memmove(data, &rb->buf[rb->tail], first);
+  rb->tail = (rb->tail + first) & (RINGBUF_SIZE - 1);
+
+  int second = to_read - first;
+  if (second > 0) {
+    memmove(data + first, &rb->buf[rb->tail], second);
+    rb->tail = (rb->tail + second) & (RINGBUF_SIZE - 1);
   }
+
+  rb->count -= to_read;
 
   // bao cho ben ghi biet da co cho trong
   wakeup(rb);
   release(&rb->lock);
 
-  return read_bytes;
+  return to_read;
 }

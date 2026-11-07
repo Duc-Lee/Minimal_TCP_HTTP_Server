@@ -215,31 +215,27 @@ struct tcp_pcb {
   void *sock; // tro sang socket tuong ung
 };
 
-// api tcp (kernel/tcp.c, tcp_input.c, tcp_output.c, tcp_timer.c)
-void tcp_init(void);
-struct tcp_pcb *tcp_pcb_alloc(void);
-void tcp_pcb_free(struct tcp_pcb *pcb);
-void tcp_pcb_insert(struct tcp_pcb *pcb);
-void tcp_pcb_set_listen(struct tcp_pcb *pcb);
-struct tcp_pcb *tcp_lookup(uint32 src_ip, uint16 src_port, uint32 dst_ip,
-                           uint16 dst_port);
-void tcp_update_rto(struct tcp_pcb *pcb, uint32 rtt_msec);
-void tcp_recalc_rto(struct tcp_pcb *pcb);
-
-void tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip);
-int tcp_output(struct tcp_pcb *pcb, struct mbuf *m, uint8 flags);
-void tcp_send_rst(uint32 local_ip, uint16 local_port, uint32 remote_ip,
-                  uint16 remote_port, uint32 in_seq, uint32 in_ack,
-                  uint8 in_flags, int in_datalen);
-void tcp_timer_tick(void);
-void tcp_timer_process(void);
-
-// kiem soat tac nghen (kernel/tcp_cc.c)
-void tcp_cc_init(struct tcp_pcb *pcb);
-void tcp_cc_on_ack(struct tcp_pcb *pcb, uint32 ack);
-void tcp_cc_on_dup_ack(struct tcp_pcb *pcb, uint32 ack);
-void tcp_cc_on_timeout(struct tcp_pcb *pcb);
-void tcp_fast_retransmit(struct tcp_pcb *pcb);
+// thong ke tcp pcb phuc vu netstat va giam sat
+#ifndef _STRUCT_TCP_STAT_
+#define _STRUCT_TCP_STAT_
+struct tcp_stat {
+  uint32 local_ip;
+  uint16 local_port;
+  uint32 remote_ip;
+  uint16 remote_port;
+  int    state;
+  uint32 cwnd;
+  uint32 ssthresh;
+  uint32 rtt;
+  uint32 rto;
+  uint32 snd_una;
+  uint32 snd_nxt;
+  uint32 snd_wnd;
+  uint32 rcv_wnd;
+  uint32 dupack_cnt;
+  int    backoff;
+};
+#endif
 
 #define RINGBUF_SIZE 4096
 
@@ -252,12 +248,6 @@ struct ringbuf {
   int count;
   int eof;
 };
-
-void ringbuf_init(struct ringbuf *rb);
-int ringbuf_write(struct ringbuf *rb, const char *data, int len);
-int ringbuf_read(struct ringbuf *rb, char *data, int len);
-int ringbuf_avail(struct ringbuf *rb);
-int ringbuf_free_space(struct ringbuf *rb);
 
 // struct socket gan vao struct file cua vfs
 struct socket {
@@ -277,6 +267,41 @@ struct socket {
 
   int ref_cnt;
 };
+
+// api tcp (kernel/tcp.c, tcp_input.c, tcp_output.c, tcp_timer.c)
+void tcp_init(void);
+struct tcp_pcb *tcp_pcb_alloc(void);
+void tcp_pcb_free(struct tcp_pcb *pcb);
+void tcp_pcb_insert(struct tcp_pcb *pcb);
+void tcp_pcb_set_listen(struct tcp_pcb *pcb);
+struct tcp_pcb *tcp_lookup(uint32 src_ip, uint16 src_port, uint32 dst_ip,
+                           uint16 dst_port);
+void tcp_update_rto(struct tcp_pcb *pcb, uint32 rtt_msec);
+void tcp_recalc_rto(struct tcp_pcb *pcb);
+int  tcp_get_stats(struct tcp_stat *stats, int max_entries);
+void tcp_dump_stats(void);
+
+void tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip);
+int tcp_output(struct tcp_pcb *pcb, struct mbuf *m, uint8 flags);
+void tcp_send_rst(uint32 local_ip, uint16 local_port, uint32 remote_ip,
+                  uint16 remote_port, uint32 in_seq, uint32 in_ack,
+                  uint8 in_flags, int in_datalen);
+void tcp_timer_tick(void);
+void tcp_timer_process(void);
+
+// kiem soat tac nghen (kernel/tcp_cc.c)
+void tcp_cc_init(struct tcp_pcb *pcb);
+void tcp_cc_on_ack(struct tcp_pcb *pcb, uint32 ack);
+void tcp_cc_on_dup_ack(struct tcp_pcb *pcb, uint32 ack);
+void tcp_cc_on_timeout(struct tcp_pcb *pcb);
+void tcp_fast_retransmit(struct tcp_pcb *pcb);
+
+// ringbuf api (kernel/ringbuf.c)
+void ringbuf_init(struct ringbuf *rb);
+int  ringbuf_write(struct ringbuf *rb, const char *data, int len);
+int  ringbuf_read(struct ringbuf *rb, char *data, int len);
+int  ringbuf_avail(struct ringbuf *rb);
+int  ringbuf_free_space(struct ringbuf *rb);
 
 // socket api (kernel/sock.c)
 void sock_init(void);

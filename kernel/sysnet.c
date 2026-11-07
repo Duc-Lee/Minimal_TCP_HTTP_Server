@@ -167,3 +167,35 @@ sys_get_loss_rate(void)
 {
   return e1000_get_loss_rate();
 }
+
+// syscall: int netstat(void *buf, int max_entries)
+uint64
+sys_netstat(void)
+{
+  uint64 uaddr;
+  int max_entries;
+
+  argaddr(0, &uaddr);
+  argint(1, &max_entries);
+
+  // neu truyen buffer NULL (uaddr == 0) thi dump thong ke ra console kernel
+  if (uaddr == 0) {
+    tcp_dump_stats();
+    return 0;
+  }
+
+  if (max_entries <= 0)
+    return -1;
+
+  if (max_entries > 32)
+    max_entries = 32;
+
+  struct tcp_stat kstats[32];
+  int count = tcp_get_stats(kstats, max_entries);
+  if (count > 0) {
+    if (either_copyout(1, uaddr, (void *)kstats, count * sizeof(struct tcp_stat)) < 0)
+      return -1;
+  }
+
+  return count;
+}

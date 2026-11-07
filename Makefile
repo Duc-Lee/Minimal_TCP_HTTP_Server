@@ -168,6 +168,7 @@ UPROGS=\
 	$U/_sync\
 	$U/_httpd\
 	$U/_setloss\
+	$U/_netstat\
 
 fs.img: mkfs/mkfs README $(UPROGS) user/largefile.bin
 	mkfs/mkfs fs.img README $(UPROGS) user/largefile.bin
