@@ -103,6 +103,9 @@ struct tcphdr {
 #define ECONNRESET   104
 #endif
 
+// tham so kiem soat tac nghen (RFC 5681 - TCP Reno)
+#define TCP_MSS      1400  // mss mac dinh trong xv6
+
 // bo dem goi tin mbuf
 struct mbuf {
   struct mbuf *next;           // moc noi vao queue
@@ -202,7 +205,12 @@ struct tcp_pcb {
   int backoff;
   int conn_err;   // loi ket noi (ECONNRESET) khi circuit breaker kich hoat
   uint32 rto_deadline;
-  uint32 dup_acks; // dem duplicate ack de fast retransmit
+
+  // kiem soat tac nghen (RFC 5681 - TCP Reno)
+  uint32 cwnd;        // Congestion window (bytes)
+  uint32 ssthresh;    // Slow start threshold (bytes)
+  uint32 dupack_cnt;  // Dem duplicate ACKs
+  uint32 recover;     // Sequence number danh dau ket thuc Fast Recovery
 
   void *sock; // tro sang socket tuong ung
 };
@@ -225,6 +233,13 @@ void tcp_send_rst(uint32 local_ip, uint16 local_port, uint32 remote_ip,
                   uint8 in_flags, int in_datalen);
 void tcp_timer_tick(void);
 void tcp_timer_process(void);
+
+// kiem soat tac nghen (kernel/tcp_cc.c)
+void tcp_cc_init(struct tcp_pcb *pcb);
+void tcp_cc_on_ack(struct tcp_pcb *pcb, uint32 ack);
+void tcp_cc_on_dup_ack(struct tcp_pcb *pcb, uint32 ack);
+void tcp_cc_on_timeout(struct tcp_pcb *pcb);
+void tcp_fast_retransmit(struct tcp_pcb *pcb);
 
 #define RINGBUF_SIZE 4096
 

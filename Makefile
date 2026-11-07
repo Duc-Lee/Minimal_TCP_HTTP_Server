@@ -40,6 +40,7 @@ OBJS = \
   $K/tcp_input.o \
   $K/tcp_output.o \
   $K/tcp_timer.o \
+  $K/tcp_cc.o \
   $K/ringbuf.o \
   $K/sock.o \
   $K/sysnet.o

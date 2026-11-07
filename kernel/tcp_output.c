@@ -75,17 +75,20 @@ tcp_output(struct tcp_pcb *pcb, struct mbuf *m, uint8 flags)
   // luu ban sao vao retransmit_q neu co data hoac syn/fin (ack thuan khong can)
   if (datalen > 0 || (flags & (TCP_FLAG_SYN | TCP_FLAG_FIN))) {
     struct mbuf *clone = mbuf_clone_for_retransmit(m, seq_end);
-    if (clone) {
-      acquire(&pcb->lock);
-      struct mbuf **tail = &pcb->retransmit_q;
-      while (*tail)
-        tail = &(*tail)->next;
-      *tail = clone;
-
-      if (pcb->rto_deadline == 0)
-        pcb->rto_deadline = ticks + (pcb->rto / 100 ? pcb->rto / 100 : 1);
-      release(&pcb->lock);
+    if (!clone) {
+      pcb->snd_nxt = seq_start;
+      mbuffree(m);
+      return -1;
     }
+    acquire(&pcb->lock);
+    struct mbuf **tail = &pcb->retransmit_q;
+    while (*tail)
+      tail = &(*tail)->next;
+    *tail = clone;
+
+    if (pcb->rto_deadline == 0)
+      pcb->rto_deadline = ticks + (pcb->rto / 100 ? pcb->rto / 100 : 1);
+    release(&pcb->lock);
   }
 
   return ip_output(m, pcb->remote_ip, IP_PROTO_TCP);

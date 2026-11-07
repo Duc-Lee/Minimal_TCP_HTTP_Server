@@ -86,7 +86,6 @@ tcp_handle_ack(struct tcp_pcb *pcb, uint32 ack, uint16 win)
       }
     }
     pcb->snd_una = ack;
-    pcb->dup_acks = 0;
     pcb->backoff = 0;
     if (have_sample)
       tcp_update_rto(pcb, sample_ms); // cap nhat srtt/rttvar/rto
@@ -98,26 +97,12 @@ tcp_handle_ack(struct tcp_pcb *pcb, uint32 ack, uint16 win)
     } else {
       pcb->rto_deadline = 0;
     }
+    // cap nhat kiem soat tac nghen khi co ack moi
+    tcp_cc_on_ack(pcb, ack);
     wakeup(pcb);
   } else if (ack == pcb->snd_una && pcb->retransmit_q != 0) {
-    pcb->dup_acks++;
-    if (pcb->dup_acks == 3) {
-      // fast retransmit khi nhan du 3 dup acks
-      struct mbuf *m = pcb->retransmit_q;
-      m->retransmitted = 1;
-      struct mbuf *copy = mbufalloc(MBUF_DEFAULT_HEAD);
-      if (copy) {
-        char *dst = mbufput(copy, m->len);
-        if (dst) {
-          memmove(dst, m->head, m->len);
-          ip_output(copy, pcb->remote_ip, IP_PROTO_TCP);
-        } else {
-          mbuffree(copy);
-        }
-      }
-      uint32 t = pcb->rto / 100;
-      pcb->rto_deadline = ticks + (t ? t : 1);
-    }
+    // duplicate ack: xu ly fast retransmit va fast recovery (rfc 5681)
+    tcp_cc_on_dup_ack(pcb, ack);
   }
 }
 
@@ -389,7 +374,9 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
         tcp_output(pcb, 0, TCP_FLAG_ACK);
         return;
       }
-      pcb->state = TCP_FIN_WAIT_2;
+      if ((int32)(ack - pcb->snd_nxt) >= 0) {
+        pcb->state = TCP_FIN_WAIT_2;
+      }
     }
     break;
 
@@ -421,19 +408,25 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
   // last_ack: da gui fin, cho ack cuoi de dong han
   case TCP_LAST_ACK:
     if (flags & TCP_FLAG_ACK) {
-      pcb->state = TCP_CLOSED;
-      release(&pcb->lock);
-      mbuffree(m);
-      tcp_pcb_free(pcb);
-      return;
+      tcp_handle_ack(pcb, ack, win);
+      if ((int32)(ack - pcb->snd_nxt) >= 0) {
+        pcb->state = TCP_CLOSED;
+        release(&pcb->lock);
+        mbuffree(m);
+        tcp_pcb_free(pcb);
+        return;
+      }
     }
     break;
 
   // closing: ca 2 ben dong cung luc
   case TCP_CLOSING:
     if (flags & TCP_FLAG_ACK) {
-      pcb->state = TCP_TIME_WAIT;
-      pcb->rto_deadline = ticks + 200;
+      tcp_handle_ack(pcb, ack, win);
+      if ((int32)(ack - pcb->snd_nxt) >= 0) {
+        pcb->state = TCP_TIME_WAIT;
+        pcb->rto_deadline = ticks + 200;
+      }
     }
     break;
 

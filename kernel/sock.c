@@ -245,15 +245,17 @@ sock_write(struct socket *s, uint64 addr, int n)
     return -1;
 
   while (total_written < n) {
-    // flow control: gioi han so goi in-flight tranh tran buffer va nghen mang
+    // flow control & congestion control: gioi han in-flight theo min(snd_wnd, cwnd)
     acquire(&pcb->lock);
     while (pcb->state == TCP_ESTABLISHED || pcb->state == TCP_CLOSE_WAIT) {
       uint32 in_flight = pcb->snd_nxt - pcb->snd_una;
-      // toi da 16 goi in-flight
-      if (in_flight < 16 * 1400) {
+      uint32 wnd = pcb->cwnd;
+      if (wnd < 16 * TCP_MSS)
+        wnd = 16 * TCP_MSS;
+      if (in_flight < wnd) {
         break;
       }
-      // doi ack de co window moi gui tiep
+      // doi ack hoac timer de co them window gui tiep
       sleep_prepare(pcb);
       release(&pcb->lock);
       sleep();

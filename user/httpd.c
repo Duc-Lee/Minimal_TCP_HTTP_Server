@@ -60,7 +60,7 @@ handle_http_client(int client_fd)
   write(client_fd, hdr, strlen(hdr));
 
   // doc va truyen du lieu theo chunk
-  char file_buf[BUF_SIZE];
+  static char file_buf[4096];
   int bytes_read;
   while ((bytes_read = read(file_fd, file_buf, sizeof(file_buf))) > 0) {
     int bytes_sent = 0;

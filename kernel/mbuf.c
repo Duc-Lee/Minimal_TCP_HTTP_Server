@@ -7,9 +7,11 @@
 #include "spinlock.h"
 #include "net.h"
 
+#define MBUF_POOL_SIZE 512
+
 static struct {
   struct spinlock lock;
-  struct mbuf mbufs[128];
+  struct mbuf mbufs[MBUF_POOL_SIZE];
   struct mbuf *free_list;
 } mbuf_pool;
 
@@ -19,7 +21,7 @@ mbufinit(void)
   initlock(&mbuf_pool.lock, "mbuf_pool");
   acquire(&mbuf_pool.lock);
   mbuf_pool.free_list = 0;
-  for (int i = 0; i < 128; i++) {
+  for (int i = 0; i < MBUF_POOL_SIZE; i++) {
     mbuf_pool.mbufs[i].next = mbuf_pool.free_list;
     mbuf_pool.mbufs[i].ref_cnt = 0;
     mbuf_pool.free_list = &mbuf_pool.mbufs[i];

@@ -68,10 +68,10 @@ tcp_pcb_alloc(void)
     pcb->rto = 200; // rto khoi tao 200ms cho qemu lan
     pcb->backoff = 0;
     pcb->conn_err = 0;
-    pcb->dup_acks = 0;
     pcb->retransmit_q = 0;
     pcb->ooo_queue = 0;
     pcb->rto_deadline = 0;
+    tcp_cc_init(pcb);
     pcb->sock = 0;
     pcb->local_ip = 0;
     pcb->local_port = 0;
@@ -229,6 +229,7 @@ tcp_timer_process(void)
       if (pcb->rto > RTO_MAX)
         pcb->rto = RTO_MAX;
       pcb->rto_deadline = ticks + (pcb->rto / 100 ? pcb->rto / 100 : 1);
+      tcp_cc_on_timeout(pcb);
 
       if (pcb->backoff > MAX_BACKOFF) {
         // circuit breaker: huy ket noi, giai phong retransmit queue
