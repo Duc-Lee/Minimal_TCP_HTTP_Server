@@ -10,7 +10,10 @@ import time
 class QEMUSimulator:
     def __init__(self, reset=False, cwd=None, output_file="test-xv6.out"):
         # Xac dinh thu muc goc cua du an
-        self.cwd = os.path.abspath(os.path.dirname(__file__), "..//tcp-xv6-testing")
+        if cwd:
+            self.cwd = os.path.abspath(cwd)
+        else:
+            self.cwd = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         self.output_file = output_file
         self.output = ""
         self.outbytes = bytearray()

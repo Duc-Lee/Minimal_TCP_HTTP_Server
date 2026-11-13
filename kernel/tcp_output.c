@@ -43,19 +43,67 @@ tcp_output(struct tcp_pcb *pcb, struct mbuf *m, uint8 flags)
 
   datalen = (int)m->len;
 
-  th = (struct tcphdr *)mbufpush(m, sizeof(struct tcphdr));
+  int optlen = 0;
+  int include_wscale = 0;
+  if (flags & TCP_FLAG_SYN) {
+    if (flags & TCP_FLAG_ACK) {
+      // SYN-ACK: chi gui wscale neu peer da de nghi trong SYN
+      include_wscale = pcb->wscale_ok;
+    } else {
+      // SYN chu dong: luon de nghi wscale
+      include_wscale = 1;
+    }
+    optlen = include_wscale ? 8 : 4;
+  }
+
+  int tcphdr_len = sizeof(struct tcphdr) + optlen;
+  th = (struct tcphdr *)mbufpush(m, tcphdr_len);
   if (!th) {
     mbuffree(m);
     return -1;
   }
 
+  memset(th, 0, tcphdr_len);
   th->sport = htons(pcb->local_port);
   th->dport = htons(pcb->remote_port);
   th->seq = htonl(pcb->snd_nxt);
   th->ack = htonl(pcb->rcv_nxt);
-  th->off = (sizeof(struct tcphdr) / 4) << 4;
+  th->off = (tcphdr_len / 4) << 4;
   th->flags = flags;
-  th->win = htons(pcb->rcv_wnd);
+
+  // Window advertisement:
+  // Theo RFC 7323: trong goi SYN (SYN hoac SYN-ACK) window field KHONG duoc phep scale
+  if (flags & TCP_FLAG_SYN) {
+    uint32 w = pcb->rcv_wnd;
+    if (w > 65535)
+      w = 65535;
+    th->win = htons((uint16)w);
+
+    uint8 *opt = (uint8 *)(th + 1);
+    opt[0] = TCPOPT_MSS;
+    opt[1] = 4;
+    opt[2] = (TCP_MSS >> 8) & 0xff;
+    opt[3] = TCP_MSS & 0xff;
+    if (include_wscale) {
+      opt[4] = TCPOPT_NOP;
+      opt[5] = TCPOPT_WSCALE;
+      opt[6] = 3;
+      opt[7] = TCP_RCV_WSCALE;
+    }
+  } else {
+    if (pcb->wscale_ok) {
+      uint32 scaled_win = pcb->rcv_wnd >> pcb->rcv_wscale;
+      if (scaled_win > 65535)
+        scaled_win = 65535;
+      th->win = htons((uint16)scaled_win);
+    } else {
+      uint32 w = pcb->rcv_wnd;
+      if (w > 65535)
+        w = 65535;
+      th->win = htons((uint16)w);
+    }
+  }
+
   th->urp = 0;
   th->cksum = 0;
 

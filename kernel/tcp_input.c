@@ -58,11 +58,48 @@ tcp_ooo_insert(struct tcp_pcb *pcb, struct mbuf *m, uint32 seq)
   *pp = m;
 }
 
+// phan tich tuy chon tcp options (MSS, Window Scale)
+static void
+tcp_parse_options(struct tcphdr *th, int hlen, struct tcp_options *opt)
+{
+  opt->has_mss = 0;
+  opt->has_wscale = 0;
+  opt->mss = 0;
+  opt->wscale = 0;
+
+  uint8 *p = (uint8 *)th + sizeof(struct tcphdr);
+  uint8 *end = (uint8 *)th + hlen;
+
+  while (p < end) {
+    uint8 kind = *p++;
+    if (kind == TCPOPT_EOL)
+      break;
+    if (kind == TCPOPT_NOP)
+      continue;
+    if (p >= end)
+      break;
+    uint8 len = *p++;
+    if (len < 2 || p + (len - 2) > end)
+      break;
+    if (kind == TCPOPT_MSS && len == 4) {
+      opt->mss = ((uint16)p[0] << 8) | (uint16)p[1];
+      opt->has_mss = 1;
+    } else if (kind == TCPOPT_WSCALE && len == 3) {
+      opt->wscale = p[0];
+      opt->has_wscale = 1;
+    }
+    p += (len - 2);
+  }
+}
+
 // xu ly ack, don retransmit_q, fast retransmit va wakeup writer
 static void
 tcp_handle_ack(struct tcp_pcb *pcb, uint32 ack, uint16 win)
 {
-  pcb->snd_wnd = win;
+  uint32 eff_win = (uint32)win;
+  if (pcb->wscale_ok)
+    eff_win = eff_win << pcb->snd_wscale;
+  pcb->snd_wnd = eff_win;
   if ((int32)(ack - pcb->snd_una) > 0) {
     // giai phong segment da duoc ack
     struct mbuf **pq = &pcb->retransmit_q;
@@ -137,6 +174,11 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
     mbuffree(m);
     return;
   }
+
+  // phan tich tcp options neu co truoc khi pull header
+  struct tcp_options opt;
+  tcp_parse_options(th, hlen, &opt);
+
   // bo tcp header lay payload
   mbufpull(m, hlen);
 
@@ -154,6 +196,22 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
   // xu ly co RST: client huy hoac dong ket noi dot ngot
   if (flags & TCP_FLAG_RST) {
     if (pcb->state != TCP_LISTEN && pcb->state != TCP_CLOSED) {
+      if (pcb->state == TCP_SYN_RCVD && pcb->sock) {
+        struct socket *ls = (struct socket *)pcb->sock;
+        acquire(&ls->lock);
+        struct tcp_pcb **curr = &ls->syn_q;
+        while (*curr) {
+          if (*curr == pcb) {
+            *curr = pcb->syn_next;
+            pcb->syn_next = 0;
+            ls->syn_cnt--;
+            break;
+          }
+          curr = &(*curr)->syn_next;
+        }
+        release(&ls->lock);
+        pcb->sock = 0;
+      }
       pcb->state = TCP_CLOSED;
       struct mbuf *q = pcb->ooo_queue;
       while (q) {
@@ -176,6 +234,19 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
 
   case TCP_LISTEN:
     if (flags & TCP_FLAG_SYN) {
+      struct socket *ls = (struct socket *)pcb->sock;
+      if (ls) {
+        acquire(&ls->lock);
+        // Kiem tra nguong bao ve SYN Queue va Accept Queue
+        if (ls->syn_cnt >= ls->syn_max || ls->backlog_cnt >= ls->backlog_max) {
+          release(&ls->lock);
+          release(&pcb->lock);
+          mbuffree(m);
+          return;
+        }
+        release(&ls->lock);
+      }
+
       // tao pcb moi cho ket noi den
       struct tcp_pcb *newpcb = tcp_pcb_alloc();
       if (!newpcb) {
@@ -189,16 +260,36 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
       newpcb->remote_port = sport;
       newpcb->irs = seq;
       newpcb->rcv_nxt = seq + 1;
-      newpcb->rcv_wnd = 4096;
+      newpcb->rcv_wnd = 16384;
       newpcb->state = TCP_SYN_RCVD;
       newpcb->sock = pcb->sock;
+
+      // Thuong luong Window Scale (RFC 7323)
+      if (opt.has_wscale) {
+        newpcb->snd_wscale = (opt.wscale > 14) ? 14 : opt.wscale;
+        newpcb->rcv_wscale = TCP_RCV_WSCALE;
+        newpcb->wscale_ok = 1;
+      } else {
+        newpcb->snd_wscale = 0;
+        newpcb->rcv_wscale = 0;
+        newpcb->wscale_ok = 0;
+      }
+
+      // Chen vao SYN Queue cua listen socket
+      if (ls) {
+        acquire(&ls->lock);
+        newpcb->syn_next = ls->syn_q;
+        ls->syn_q = newpcb;
+        ls->syn_cnt++;
+        release(&ls->lock);
+      }
 
       tcp_pcb_insert(newpcb);
 
       release(&pcb->lock);
       mbuffree(m);
 
-      // gui syn-ack buoc 2
+      // gui syn-ack buoc 2 (se kem theo MSS va Window Scale neu wscale_ok)
       tcp_output(newpcb, 0, TCP_FLAG_SYN | TCP_FLAG_ACK);
       return;
     }
@@ -206,10 +297,22 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
 
   case TCP_SYN_SENT:
     if ((flags & TCP_FLAG_SYN) && (flags & TCP_FLAG_ACK)) {
+      if (opt.has_wscale) {
+        pcb->snd_wscale = (opt.wscale > 14) ? 14 : opt.wscale;
+        pcb->rcv_wscale = TCP_RCV_WSCALE;
+        pcb->wscale_ok = 1;
+      } else {
+        pcb->snd_wscale = 0;
+        pcb->rcv_wscale = 0;
+        pcb->wscale_ok = 0;
+      }
       pcb->irs = seq;
       pcb->rcv_nxt = seq + 1;
       pcb->snd_una = ack;
-      pcb->snd_wnd = win;
+      if (pcb->wscale_ok)
+        pcb->snd_wnd = ((uint32)win) << pcb->snd_wscale;
+      else
+        pcb->snd_wnd = win;
       pcb->state = TCP_ESTABLISHED;
       release(&pcb->lock);
       mbuffree(m);
@@ -228,25 +331,66 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
       return;
     }
     if (flags & TCP_FLAG_ACK) {
+      struct socket *ls = (struct socket *)pcb->sock;
+      if (ls) {
+        acquire(&ls->lock);
+        // Kiem tra Accept Queue: neu day thi drop ACK de client retry sau
+        if (ls->backlog_cnt >= ls->backlog_max) {
+          release(&ls->lock);
+          release(&pcb->lock);
+          mbuffree(m);
+          return;
+        }
+
+        struct socket *newsock = sock_alloc_for_pcb(pcb);
+        if (!newsock) {
+          // Bang socket he thong tam het, drop ACK doi giai phong
+          release(&ls->lock);
+          release(&pcb->lock);
+          mbuffree(m);
+          return;
+        }
+
+        // Go khoi syn_q cua listen socket
+        struct tcp_pcb **curr = &ls->syn_q;
+        while (*curr) {
+          if (*curr == pcb) {
+            *curr = pcb->syn_next;
+            pcb->syn_next = 0;
+            ls->syn_cnt--;
+            break;
+          }
+          curr = &(*curr)->syn_next;
+        }
+
+        // Chen vao duoi backlog_q cua listen socket (FIFO)
+        newsock->next = 0;
+        if (ls->backlog_tail) {
+          ls->backlog_tail->next = newsock;
+        } else {
+          ls->backlog_q = newsock;
+        }
+        ls->backlog_tail = newsock;
+        ls->backlog_cnt++;
+        pcb->sock = newsock;
+
+        release(&ls->lock);
+        wakeup(ls);
+      }
+
       // don goi syn-ack khoi retransmit_q va cap nhat snd_una
       tcp_handle_ack(pcb, ack, win);
       pcb->state = TCP_ESTABLISHED;
 
-      // day vao backlog cua socket listen de accept lay ra
-      struct socket *ls = (struct socket *)pcb->sock;
-      if (ls) {
-        acquire(&ls->lock);
-        if (ls->backlog_cnt < ls->backlog_max) {
-          struct socket *newsock = sock_alloc_for_pcb(pcb);
-          if (newsock) {
-            newsock->next = ls->backlog_q;
-            ls->backlog_q = newsock;
-            ls->backlog_cnt++;
-            pcb->sock = newsock;
-          }
+      // Neu goi buoc 3 co mang theo payload du lieu (HTTP GET)
+      if (m->len > 0) {
+        if (seq == pcb->rcv_nxt) {
+          pcb->rcv_nxt += m->len;
+          release(&pcb->lock);
+          sock_push_data(pcb, m);
+          tcp_output(pcb, 0, TCP_FLAG_ACK);
+          return;
         }
-        release(&ls->lock);
-        wakeup(ls);
       }
     }
     break;

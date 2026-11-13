@@ -11,7 +11,7 @@
 #include "proc.h"
 #include "net.h"
 
-#define MAX_SOCKETS 16
+#define MAX_SOCKETS 32
 
 static struct {
   struct spinlock lock;
@@ -48,8 +48,12 @@ sock_alloc(void)
     s->ref_cnt = 1;
     s->state = 0;
     s->backlog_q = 0;
+    s->backlog_tail = 0;
     s->backlog_cnt = 0;
     s->backlog_max = 0;
+    s->syn_q = 0;
+    s->syn_cnt = 0;
+    s->syn_max = 0;
     ringbuf_init(&s->rx_buf);
     ringbuf_init(&s->tx_buf);
     s->pcb = tcp_pcb_alloc();
@@ -75,8 +79,12 @@ sock_alloc_for_pcb(struct tcp_pcb *pcb)
     s->ref_cnt = 1;
     s->state = 0;
     s->backlog_q = 0;
+    s->backlog_tail = 0;
     s->backlog_cnt = 0;
     s->backlog_max = 0;
+    s->syn_q = 0;
+    s->syn_cnt = 0;
+    s->syn_max = 0;
     ringbuf_init(&s->rx_buf);
     ringbuf_init(&s->tx_buf);
     s->pcb = pcb;
@@ -116,7 +124,14 @@ sock_close(struct socket *s)
     // giai phong cac ket noi con ton dong trong hang doi backlog neu co
     struct socket *q = s->backlog_q;
     s->backlog_q = 0;
+    s->backlog_tail = 0;
     s->backlog_cnt = 0;
+
+    // giai phong cac ket noi dang bat tay dở dang trong syn_q
+    struct tcp_pcb *sq = s->syn_q;
+    s->syn_q = 0;
+    s->syn_cnt = 0;
+    s->syn_max = 0;
     release(&s->lock);
 
     while (q) {
@@ -124,6 +139,14 @@ sock_close(struct socket *s)
       q->next = 0;
       sock_close(q);
       q = next_q;
+    }
+
+    while (sq) {
+      struct tcp_pcb *next_sq = sq->syn_next;
+      sq->syn_next = 0;
+      sq->sock = 0;
+      tcp_pcb_free(sq);
+      sq = next_sq;
     }
 
     if (pcb) {
@@ -329,14 +352,22 @@ sock_listen(struct socket *s, int backlog)
   acquire(&s->lock);
   if (s->pcb) {
     s->pcb->state = TCP_LISTEN;
+    if (backlog < 16)
+      backlog = 16;
     s->backlog_max = backlog;
+    s->backlog_cnt = 0;
+    s->backlog_q = 0;
+    s->backlog_tail = 0;
+    s->syn_q = 0;
+    s->syn_cnt = 0;
+    s->syn_max = (backlog * 2 >= 32) ? backlog * 2 : 32;
     tcp_pcb_set_listen(s->pcb);
   }
   release(&s->lock);
   return 0;
 }
 
-// lay ket noi tu hang doi backlog
+// lay ket noi tu hang doi backlog (FIFO)
 struct socket *
 sock_accept(struct socket *s)
 {
@@ -344,6 +375,11 @@ sock_accept(struct socket *s)
 
   acquire(&s->lock);
   while (s->backlog_q == 0) {
+    // neu socket bi dong hoac huy listen thi thoat
+    if (s->ref_cnt <= 0 || !s->pcb || s->pcb->state != TCP_LISTEN) {
+      release(&s->lock);
+      return 0;
+    }
     // chua co client thi sleep cho bat tay xong
     sleep_prepare(s);
     release(&s->lock);
@@ -353,6 +389,8 @@ sock_accept(struct socket *s)
 
   newsock = s->backlog_q;
   s->backlog_q = newsock->next;
+  if (s->backlog_q == 0)
+    s->backlog_tail = 0;
   newsock->next = 0;
   s->backlog_cnt--;
   release(&s->lock);

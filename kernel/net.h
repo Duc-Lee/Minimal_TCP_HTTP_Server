@@ -92,6 +92,20 @@ struct tcphdr {
 #define TCP_FLAG_ACK 0x10
 #define TCP_FLAG_URG 0x20
 
+// tuy chon tcp options (RFC 793, RFC 7323)
+#define TCPOPT_EOL      0
+#define TCPOPT_NOP      1
+#define TCPOPT_MSS      2
+#define TCPOPT_WSCALE   3
+#define TCP_RCV_WSCALE  2  // factor shift 2 (x4 window)
+
+struct tcp_options {
+  uint16 mss;
+  uint8  wscale;
+  uint8  has_mss;
+  uint8  has_wscale;
+};
+
 #define MBUF_SIZE         2048
 #define MBUF_DEFAULT_HEAD 128
 
@@ -212,6 +226,12 @@ struct tcp_pcb {
   uint32 dupack_cnt;  // Dem duplicate ACKs
   uint32 recover;     // Sequence number danh dau ket thuc Fast Recovery
 
+  // tuy chon window scale (RFC 7323)
+  uint8 snd_wscale;          // scale factor tu peer
+  uint8 rcv_wscale;          // scale factor cua xv6
+  uint8 wscale_ok;           // 1 neu ca 2 ben dong y dung window scale
+  struct tcp_pcb *syn_next;  // moc noi vao syn_q cua listen socket
+
   void *sock; // tro sang socket tuong ung
 };
 
@@ -259,11 +279,16 @@ struct socket {
   struct ringbuf rx_buf;
   struct ringbuf tx_buf;
 
-  // hang doi listen backlog
+  // hang doi listen backlog: Accept Queue (FIFO) va SYN Queue
   struct socket *backlog_q;
+  struct socket *backlog_tail;
   struct socket *next;
   int backlog_max;
   int backlog_cnt;
+
+  struct tcp_pcb *syn_q;     // hang doi cac ket noi dang bat tay (SYN_RCVD)
+  int syn_cnt;               // so luong ket noi dang trong syn_q
+  int syn_max;               // dung luong toi da cua syn_q
 
   int ref_cnt;
 };

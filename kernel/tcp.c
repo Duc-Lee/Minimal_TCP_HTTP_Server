@@ -71,6 +71,10 @@ tcp_pcb_alloc(void)
     pcb->retransmit_q = 0;
     pcb->ooo_queue = 0;
     pcb->rto_deadline = 0;
+    pcb->snd_wscale = 0;
+    pcb->rcv_wscale = 0;
+    pcb->wscale_ok = 0;
+    pcb->syn_next = 0;
     tcp_cc_init(pcb);
     pcb->sock = 0;
     pcb->local_ip = 0;
@@ -131,6 +135,24 @@ tcp_pcb_free(struct tcp_pcb *pcb)
     q = next;
   }
   pcb->ooo_queue = 0;
+
+  // neu pcb con nam trong syn_q cua listen socket thi go ra
+  if (pcb->sock) {
+    struct socket *ls = (struct socket *)pcb->sock;
+    acquire(&ls->lock);
+    struct tcp_pcb **curr = &ls->syn_q;
+    while (*curr) {
+      if (*curr == pcb) {
+        *curr = pcb->syn_next;
+        pcb->syn_next = 0;
+        ls->syn_cnt--;
+        break;
+      }
+      curr = &(*curr)->syn_next;
+    }
+    release(&ls->lock);
+    pcb->sock = 0;
+  }
 
   acquire(&tcp_mgr.lock);
 
@@ -243,6 +265,22 @@ tcp_timer_process(void)
         pcb->retransmit_q = 0;
         pcb->rto_deadline = 0;
         pcb->conn_err = ECONNRESET;
+        if (pcb->state == TCP_SYN_RCVD && pcb->sock) {
+          struct socket *ls = (struct socket *)pcb->sock;
+          acquire(&ls->lock);
+          struct tcp_pcb **curr = &ls->syn_q;
+          while (*curr) {
+            if (*curr == pcb) {
+              *curr = pcb->syn_next;
+              pcb->syn_next = 0;
+              ls->syn_cnt--;
+              break;
+            }
+            curr = &(*curr)->syn_next;
+          }
+          release(&ls->lock);
+          pcb->sock = 0;
+        }
         pcb->state = TCP_CLOSED;
         wakeup(pcb);
         if (pcb->sock)
