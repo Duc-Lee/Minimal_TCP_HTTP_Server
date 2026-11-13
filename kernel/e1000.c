@@ -7,8 +7,14 @@
 #include "e1000_dev.h"
 #include "net.h"
 
-#define TX_RING_SIZE 16
-#define RX_RING_SIZE 16
+// tuan 4: nang ring tu 16 len 32 descriptor de chiu burst tu nhieu worker.
+// tdlen/rdlen phai la boi so 128 byte (8 descriptor x 16 byte).
+// rx ring giu thuong truc RX_RING_SIZE mbuf cua pool (xem NMBUF trong mbuf.c).
+#define TX_RING_SIZE 32
+#define RX_RING_SIZE 32
+
+// so lan poll lai khi tx ring day truoc khi drop goi
+#define TX_FULL_SPIN 64
 
 static volatile uint32 *regs;
 struct spinlock e1000_lock;
@@ -19,6 +25,39 @@ static struct mbuf *tx_mbufs[TX_RING_SIZE];
 
 __attribute__((aligned(16))) static struct rx_desc rx_ring[RX_RING_SIZE];
 static struct mbuf *rx_mbufs[RX_RING_SIZE];
+
+// quan ly tx ring bang chi so phan mem (bao ve boi e1000_lock):
+// cac slot [tx_clean, tx_clean + tx_inflight) dang cho card gui / cho thu hoi.
+// card coi ring rong khi tdh == tdt nen toi da TX_RING_SIZE - 1 slot in-flight.
+static uint32 tx_tail;  // slot ke tiep driver se ghi (ban sao cua tdt)
+static uint32 tx_clean; // slot cu nhat chua thu hoi
+static int tx_inflight; // so slot dang giu mbuf
+
+// thong ke driver. tx_* bao ve boi e1000_lock; rx_* chi cap nhat trong
+// e1000_intr (plic chi giao irq e1000 cho 1 hart tai 1 thoi diem).
+static struct {
+  uint tx_packets;     // goi da dua xuong card
+  uint tx_reclaimed;   // descriptor tx da thu hoi mbuf
+  uint tx_ring_full;   // goi bi drop vi tx ring day
+  uint tx_loss_sim;    // goi bi drop boi bo gia lap mat goi (setloss)
+  int tx_inflight_max; // so slot tx in-flight cao nhat tung thay
+  uint rx_packets;     // goi nhan chuyen len eth_input
+  uint rx_nombuf;      // goi nhan bi drop vi het mbuf de bu vao ring
+  uint rx_overrun;     // so lan card bao rx overrun (ring het descriptor)
+} e1000_stats;
+
+static int
+is_pow2(uint n)
+{
+  return n != 0 && (n & (n - 1)) == 0;
+}
+
+// doc status descriptor qua volatile vi card ghi vao bang dma
+static inline uint8
+desc_status(volatile uint8 *status)
+{
+  return *status;
+}
 
 // mac cua card e1000 trong qemu
 uint8 local_mac[ETH_ADDR_LEN] = {0x52, 0x54, 0x00, 0x12, 0x34, 0x56};
@@ -73,6 +112,9 @@ e1000_init(uint32 *e1000_regs)
     tx_ring[i].status = E1000_TXD_STAT_DD;
     tx_mbufs[i] = 0;
   }
+  tx_tail = 0;
+  tx_clean = 0;
+  tx_inflight = 0;
 
   uint64 tx_phys = (uint64)tx_ring;
   regs[E1000_TDBAL / 4] = tx_phys & 0xffffffff;
@@ -118,12 +160,42 @@ e1000_init(uint32 *e1000_regs)
   regs[E1000_RCTL / 4] =
     E1000_RCTL_EN | E1000_RCTL_BAM | E1000_RCTL_SZ_2048 | E1000_RCTL_SECRC;
 
-  // bat ngat rxt0
-  regs[E1000_IMS / 4] = E1000_ICR_RXT0;
+  // bat ngat:
+  //  rxt0   : co goi moi
+  //  rxdmt0 : so descriptor rx con trong xuong duoi nguong (1/2 ring) -> don som
+  //  rxo    : rx overrun, card het descriptor -> dem va don ngay
+  //  txqe   : tx queue rong -> thu hoi mbuf cua cac goi da gui xong
+  regs[E1000_IMS / 4] =
+    E1000_ICR_RXT0 | E1000_ICR_RXDMT0 | E1000_ICR_RXO | E1000_ICR_TXQE;
 
   regs[E1000_CTL / 4] |= E1000_CTL_SLU;
 
   release(&e1000_lock);
+
+  printk("e1000: rx_ring=%d tx_ring=%d\n", RX_RING_SIZE, TX_RING_SIZE);
+}
+
+// thu hoi cac descriptor tx card da gui xong (dd=1) va tra mbuf ve pool ngay,
+// thay vi doi den khi slot duoc dung lai (truoc day co the giam toi 16 mbuf).
+// goi khi dang giu e1000_lock. tra ve so slot da thu hoi.
+static int
+e1000_tx_reclaim_locked(void)
+{
+  int n = 0;
+
+  while (tx_inflight > 0) {
+    if (!(desc_status(&tx_ring[tx_clean].status) & E1000_TXD_STAT_DD))
+      break;
+    if (tx_mbufs[tx_clean]) {
+      mbuffree(tx_mbufs[tx_clean]);
+      tx_mbufs[tx_clean] = 0;
+    }
+    tx_clean = (tx_clean + 1) % TX_RING_SIZE;
+    tx_inflight--;
+    n++;
+  }
+  e1000_stats.tx_reclaimed += n;
+  return n;
 }
 
 // truyen goi qua dma tx ring
@@ -138,33 +210,52 @@ e1000_transmit(struct mbuf *m)
     eth_type = ntohs(*(uint16 *)(m->head + 12));
 
   if (eth_type != ETH_TYPE_ARP && should_drop_packet()) {
+    e1000_stats.tx_loss_sim++;
     release(&e1000_lock);
     mbuffree(m);
     return 0; // drop goi de test retransmit
   }
 
-  uint32 tdt = regs[E1000_TDT / 4];
-  struct tx_desc *d = &tx_ring[tdt % TX_RING_SIZE];
+  // don cac slot da gui xong truoc, tranh ring day gia
+  e1000_tx_reclaim_locked();
 
-  if (!(d->status & E1000_TXD_STAT_DD)) {
-    // tx ring day
+  // ring van day: card (qemu) gui rat nhanh, poll them vai lan cho dd duoc bat
+  for (int spin = 0; tx_inflight >= TX_RING_SIZE - 1 && spin < TX_FULL_SPIN;
+       spin++)
+    e1000_tx_reclaim_locked();
+
+  if (tx_inflight >= TX_RING_SIZE - 1) {
+    // tx ring day that su: drop, tcp se truyen lai sau rto
+    uint nfull = ++e1000_stats.tx_ring_full;
     release(&e1000_lock);
     mbuffree(m);
+    if (is_pow2(nfull))
+      printk("[e1000] WARN tx ring full, drop (total=%d)\n", nfull);
     return -1;
   }
 
-  if (tx_mbufs[tdt % TX_RING_SIZE]) {
-    mbuffree(tx_mbufs[tdt % TX_RING_SIZE]);
-    tx_mbufs[tdt % TX_RING_SIZE] = 0;
+  struct tx_desc *d = &tx_ring[tx_tail];
+  if (tx_mbufs[tx_tail]) {
+    // khong the xay ra neu tx_inflight dung, phong thu de khong ro ri mbuf
+    mbuffree(tx_mbufs[tx_tail]);
+    tx_mbufs[tx_tail] = 0;
   }
 
   d->addr = (uint64)m->head;
   d->length = m->len;
   d->cmd = E1000_TXD_CMD_EOP | E1000_TXD_CMD_IFCS | E1000_TXD_CMD_RS;
   d->status = 0;
-  tx_mbufs[tdt % TX_RING_SIZE] = m;
+  tx_mbufs[tx_tail] = m;
 
-  regs[E1000_TDT / 4] = (tdt + 1) % TX_RING_SIZE;
+  tx_tail = (tx_tail + 1) % TX_RING_SIZE;
+  tx_inflight++;
+  if (tx_inflight > e1000_stats.tx_inflight_max)
+    e1000_stats.tx_inflight_max = tx_inflight;
+  e1000_stats.tx_packets++;
+
+  // descriptor phai ghi xong vao ram truoc khi bao card qua tdt
+  __sync_synchronize();
+  regs[E1000_TDT / 4] = tx_tail;
 
   release(&e1000_lock);
   return 0;
@@ -179,7 +270,7 @@ e1000_recv(void)
     uint32 next = (rdt + 1) % RX_RING_SIZE;
     struct rx_desc *d = &rx_ring[next];
 
-    if (!(d->status & E1000_RXD_STAT_DD))
+    if (!(desc_status(&d->status) & E1000_RXD_STAT_DD))
       break;
 
     struct mbuf *m = rx_mbufs[next];
@@ -187,17 +278,34 @@ e1000_recv(void)
 
     // cap mbuf moi bu vao slot
     struct mbuf *newm = mbufalloc(0);
+    if (!newm) {
+      // pool can: thu hoi mbuf dang nam o tx ring roi thu lai mot lan
+      acquire(&e1000_lock);
+      int got = e1000_tx_reclaim_locked();
+      release(&e1000_lock);
+      if (got > 0)
+        newm = mbufalloc(0);
+    }
+
     if (newm) {
       rx_ring[next].addr = (uint64)newm->head;
       rx_ring[next].status = 0;
       rx_mbufs[next] = newm;
     } else {
+      // van het mbuf: bo goi nay, giu buffer cu trong ring de card con cho ghi
+      uint ndrop = ++e1000_stats.rx_nombuf;
       rx_ring[next].status = 0;
+      __sync_synchronize();
       regs[E1000_RDT / 4] = next;
+      if (is_pow2(ndrop))
+        printk("[e1000] WARN rx drop: no mbuf (total=%d)\n", ndrop);
       continue;
     }
 
+    // tra slot cho card ngay de card co cho ghi goi tiep theo
+    __sync_synchronize();
     regs[E1000_RDT / 4] = next;
+    e1000_stats.rx_packets++;
 
     // chuyen len eth_input, khong giu lock tranh deadlock
     eth_input(m);
@@ -208,9 +316,26 @@ e1000_recv(void)
 void
 e1000_intr(void)
 {
-  uint32 icr = regs[E1000_ICR / 4];
+  // doc icr se xoa cac bit nguyen nhan; doc lai vai vong de khong bo sot su kien
+  // den trong luc dang xu ly (vd. goi moi den khi dang chay eth_input)
+  for (int round = 0; round < 4; round++) {
+    uint32 icr = regs[E1000_ICR / 4];
+    if (icr == 0)
+      break;
 
-  if (icr & E1000_ICR_RXT0) {
-    e1000_recv();
+    if (icr & E1000_ICR_RXO) {
+      uint nover = ++e1000_stats.rx_overrun;
+      if (is_pow2(nover))
+        printk("[e1000] WARN rx overrun (total=%d)\n", nover);
+    }
+
+    if (icr & (E1000_ICR_TXQE | E1000_ICR_TXDW)) {
+      acquire(&e1000_lock);
+      e1000_tx_reclaim_locked();
+      release(&e1000_lock);
+    }
+
+    if (icr & (E1000_ICR_RXT0 | E1000_ICR_RXDMT0 | E1000_ICR_RXO))
+      e1000_recv();
   }
 }
