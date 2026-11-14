@@ -170,8 +170,8 @@ UPROGS=\
 	$U/_setloss\
 	$U/_netstat\
 
-fs.img: mkfs/mkfs README $(UPROGS) user/largefile.bin
-	mkfs/mkfs fs.img README $(UPROGS) user/largefile.bin
+fs.img: mkfs/mkfs README $(UPROGS) user/largefile.bin user/index.html
+	mkfs/mkfs fs.img README $(UPROGS) user/largefile.bin user/index.html
 
 user/largefile.bin:
 	dd if=/dev/urandom of=user/largefile.bin bs=1024 count=1024

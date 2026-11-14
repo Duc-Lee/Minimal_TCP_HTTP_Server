@@ -9,7 +9,7 @@ import time
 
 class QEMUSimulator:
     def __init__(self, reset=False, cwd=None, output_file="test-xv6.out"):
-        # Xac dinh thu muc goc cua du an
+
         if cwd:
             self.cwd = os.path.abspath(cwd)
         else:
