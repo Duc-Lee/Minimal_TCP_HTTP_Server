@@ -23,6 +23,7 @@ main()
     procinit();         // process table
     trapinit();         // trap vectors
     trapinithart();     // install kernel trap vector
+    hwclock_init();     // hieu chuan rdcycle theo dong ho time (us)
     plicinit();         // set up interrupt controller
     plicinithart();     // ask PLIC for device interrupts
     binit();            // buffer cache

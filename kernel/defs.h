@@ -26,6 +26,15 @@ void            consputc(int);
 // exec.c
 int             kexec(char*, char**);
 
+// hwclock.c (tuan 5 - dong ho phan cung do phan giai us)
+void            hwclock_init(void);
+uint64          hwclock_now_us(void);
+uint64          hwclock_uptime_us(void);
+uint64          hwclock_cycles(void);
+uint64          hwclock_cycles_to_us(uint64);
+uint64          hwclock_us_to_cycles(uint64);
+uint64          hwclock_cycles_per_us_x1000(void);
+
 // file.c
 struct file*    filealloc(void);
 void            fileclose(struct file*);

@@ -42,6 +42,7 @@ tcp_init(void)
     tcp_mgr.hash_table[i] = 0;
 
   release(&tcp_mgr.lock);
+  tcp_timer_selftest();
 }
 
 // cap phat pcb moi
@@ -76,6 +77,7 @@ tcp_pcb_alloc(void)
     pcb->wscale_ok = 0;
     pcb->syn_next = 0;
     tcp_cc_init(pcb);
+    tcp_rate_init(pcb); // tuan 5: reset min_rtt / delivered / delivery_rate
     pcb->sock = 0;
     pcb->local_ip = 0;
     pcb->local_port = 0;
@@ -339,6 +341,9 @@ tcp_get_stats(struct tcp_stat *stats, int max_entries)
     stats[count].rcv_wnd = pcb->rcv_wnd;
     stats[count].dupack_cnt = pcb->dupack_cnt;
     stats[count].backoff = pcb->backoff;
+    stats[count].rtt_us = pcb->latest_rtt_us;
+    stats[count].min_rtt_us = pcb->min_rtt_us;
+    stats[count].delivery_rate = pcb->delivery_rate;
     release(&pcb->lock);
 
     count++;
@@ -375,6 +380,9 @@ tcp_dump_stats(void)
            (pcb->remote_ip >> 24) & 0xff, (pcb->remote_ip >> 16) & 0xff,
            (pcb->remote_ip >> 8) & 0xff, pcb->remote_ip & 0xff, pcb->remote_port,
            pcb->cwnd, pcb->ssthresh, pcb->srtt >> 3, pcb->rto);
+    printk("tcp[%d]:   rtt_us=%d min_rtt_us=%d delivered=%lu rate=%dB/s samples=%d\n",
+           i, pcb->latest_rtt_us, pcb->min_rtt_us, pcb->delivered,
+           pcb->delivery_rate, pcb->rtt_samples);
     release(&pcb->lock);
   }
   release(&tcp_mgr.lock);

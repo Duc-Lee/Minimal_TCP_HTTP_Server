@@ -148,6 +148,10 @@ mbuf_take_locked(struct mbuf **out, unsigned int headroom)
   m->seq_end = 0;
   m->retransmitted = 0;
   m->send_tick = 0;
+  m->send_us = 0;
+  m->tx_delivered = 0;
+  m->tx_delivered_us = 0;
+  m->tx_first_sent_us = 0;
   m->head = m->buf + headroom;
   m->len = 0;
 

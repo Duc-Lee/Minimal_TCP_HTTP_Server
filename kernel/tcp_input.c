@@ -105,14 +105,29 @@ tcp_handle_ack(struct tcp_pcb *pcb, uint32 ack, uint16 win)
     struct mbuf **pq = &pcb->retransmit_q;
     int have_sample = 0;
     uint32 sample_ms = 0;
+    uint64 now_us = tcp_now_us();
+    uint32 acked = ack - pcb->snd_una;
+    struct tcp_rate_sample rs;
+    int have_rs = 0;
     while (*pq) {
       uint32 seg_end = (*pq)->seq_end;
       if ((int32)(ack - seg_end) >= 0) {
         struct mbuf *done = *pq;
         // karn: chi lay mau rtt tu segment chua tung gui lai
         if (!done->retransmitted) {
-          uint32 dt = ticks - done->send_tick;
-          sample_ms = (dt ? dt : 1) * 100;
+          if (done->send_us != 0 && now_us >= done->send_us) {
+            // tuan 5: rtt do phan giai us tu dong ho phan cung, lam tron len ms
+            uint64 rtt_us = now_us - done->send_us;
+            sample_ms = (uint32)((rtt_us + 999) / 1000);
+            if (sample_ms == 0)
+              sample_ms = 1;
+            // giu mau cua segment moi nhat duoc ack cho min_rtt / delivery rate
+            tcp_rate_snapshot(done, &rs);
+            have_rs = 1;
+          } else {
+            uint32 dt = ticks - done->send_tick;
+            sample_ms = (dt ? dt : 1) * 100;
+          }
           have_sample = 1;
         }
         *pq = done->next;
@@ -124,6 +139,8 @@ tcp_handle_ack(struct tcp_pcb *pcb, uint32 ack, uint16 win)
     }
     pcb->snd_una = ack;
     pcb->backoff = 0;
+    // cap nhat latest_rtt_us, min_rtt 10s, delivered, delivery_rate cho BBR
+    tcp_rate_on_ack(pcb, acked, now_us, have_rs ? &rs : 0);
     if (have_sample)
       tcp_update_rto(pcb, sample_ms); // cap nhat srtt/rttvar/rto
     else

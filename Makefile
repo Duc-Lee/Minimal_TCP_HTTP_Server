@@ -40,6 +40,7 @@ OBJS = \
   $K/tcp_input.o \
   $K/tcp_output.o \
   $K/tcp_timer.o \
+  $K/hwclock.o \
   $K/tcp_cc.o \
   $K/ringbuf.o \
   $K/sock.o \
@@ -169,6 +170,7 @@ UPROGS=\
 	$U/_httpd\
 	$U/_setloss\
 	$U/_netstat\
+	$U/_hwclock\
 
 fs.img: mkfs/mkfs README $(UPROGS) user/largefile.bin user/index.html
 	mkfs/mkfs fs.img README $(UPROGS) user/largefile.bin user/index.html

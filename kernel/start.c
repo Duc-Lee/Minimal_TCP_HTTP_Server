@@ -59,7 +59,9 @@ timerinit()
   w_menvcfg(r_menvcfg() | MENVCFG_STCE);
 
   // allow supervisor to use stimecmp and time.
-  w_mcounteren(r_mcounteren() | 2);
+  // tuan 5: mo them cycle va instret de S-mode doc rdcycle() do chu ky cpu
+  // (sys_sendfile, hieu chuan hwclock) ma khong bi trap illegal instruction.
+  w_mcounteren(r_mcounteren() | COUNTEREN_CY | COUNTEREN_TM | COUNTEREN_IR);
 
   // ask for the very first timer interrupt.
   w_stimecmp(r_time() + 1000000);

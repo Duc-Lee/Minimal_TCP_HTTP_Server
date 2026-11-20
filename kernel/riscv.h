@@ -305,6 +305,73 @@ r_time()
   return x;
 }
 
+// ---- bo dem phan cung risc-v (tuan 5 - TV1, ha tang do thoi gian cho BBR) ----
+
+// cac bit trong mcounteren / scounteren: cho phep mode thap hon doc counter.
+// thieu bit tuong ung thi lenh csrr cycle/time/instret o S/U-mode se bi
+// trap illegal instruction.
+#define COUNTEREN_CY (1L << 0) // cycle
+#define COUNTEREN_TM (1L << 1) // time
+#define COUNTEREN_IR (1L << 2) // instret
+
+// dong ho "time" (CLINT mtime) cua QEMU virt chay co dinh 10 MHz:
+// 1 tick timebase = 100 ns, 10 tick = 1 us, 1000000 tick = 100 ms (1 tick xv6)
+// (guard dung chung voi user/user.h vi ulib.c include ca hai file)
+#ifndef _HW_COUNTERS_COMMON_
+#define _HW_COUNTERS_COMMON_
+#define TIMEBASE_HZ     10000000UL
+#define TIMEBASE_PER_US (TIMEBASE_HZ / 1000000UL)
+
+// lenh gia rdcycle: so chu ky xung nhip cpu tu luc reset (csr cycle)
+static inline uint64
+rdcycle(void)
+{
+  uint64 x;
+  asm volatile("csrr %0, cycle" : "=r"(x));
+  return x;
+}
+#endif // _HW_COUNTERS_COMMON_
+
+// so chu ky xung nhip cpu tu luc reset (csr cycle, lenh rdcycle).
+// tan so khong co dinh (phu thuoc may host/qemu) nen phai hieu chuan voi
+// dong ho time truoc khi doi sang thoi gian (xem kernel/hwclock.c).
+static inline uint64
+r_cycle()
+{
+  return rdcycle();
+}
+
+// so lenh da thuc thi xong (csr instret)
+static inline uint64
+r_instret()
+{
+  uint64 x;
+  asm volatile("csrr %0, instret" : "=r"(x));
+  return x;
+}
+
+// thoi gian thuc tu luc boot, don vi micro giay (do phan giai 0.1 us)
+static inline uint64
+r_time_us()
+{
+  return r_time() / TIMEBASE_PER_US;
+}
+
+// Supervisor Counter-Enable: cho phep user-mode doc cycle/time/instret
+static inline void
+w_scounteren(uint64 x)
+{
+  asm volatile("csrw scounteren, %0" : : "r"(x));
+}
+
+static inline uint64
+r_scounteren()
+{
+  uint64 x;
+  asm volatile("csrr %0, scounteren" : "=r"(x));
+  return x;
+}
+
 // enable device interrupts
 static inline void
 intr_on()

@@ -25,8 +25,51 @@ struct tcp_stat {
   uint32 rcv_wnd;
   uint32 dupack_cnt;
   int    backoff;
+  // tuan 5: thong so thoi gian do phan giai us
+  uint32 rtt_us;         // mau rtt gan nhat (us)
+  uint32 min_rtt_us;     // min rtt cua so truot 10s (us)
+  uint32 delivery_rate;  // bytes/s
 };
 #endif
+
+// tuan 5: doc truc tiep bo dem phan cung risc-v tu user-mode
+// (kernel da bat scounteren CY|TM|IR trong trapinithart)
+// guard dung chung voi kernel/riscv.h (ulib.c, usertests.c include ca hai)
+#ifndef _HW_COUNTERS_COMMON_
+#define _HW_COUNTERS_COMMON_
+#define TIMEBASE_HZ     10000000UL // csr time cua qemu virt: 10 MHz
+#define TIMEBASE_PER_US (TIMEBASE_HZ / 1000000UL)
+
+static inline uint64
+rdcycle(void)
+{
+  uint64 x;
+  asm volatile("csrr %0, cycle" : "=r"(x));
+  return x;
+}
+#endif // _HW_COUNTERS_COMMON_
+
+static inline uint64
+rdtime(void)
+{
+  uint64 x;
+  asm volatile("csrr %0, time" : "=r"(x));
+  return x;
+}
+
+static inline uint64
+rdinstret(void)
+{
+  uint64 x;
+  asm volatile("csrr %0, instret" : "=r"(x));
+  return x;
+}
+
+static inline uint64
+rdtime_us(void)
+{
+  return rdtime() / TIMEBASE_PER_US;
+}
 
 // system calls
 int fork(void);

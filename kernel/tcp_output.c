@@ -129,6 +129,8 @@ tcp_output(struct tcp_pcb *pcb, struct mbuf *m, uint8 flags)
       return -1;
     }
     acquire(&pcb->lock);
+    // dau thoi gian us + snapshot delivered cho do rtt/delivery rate (tuan 5)
+    tcp_rate_on_send(pcb, clone);
     struct mbuf **tail = &pcb->retransmit_q;
     while (*tail)
       tail = &(*tail)->next;

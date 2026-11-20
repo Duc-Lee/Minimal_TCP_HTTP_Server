@@ -130,6 +130,11 @@ struct mbuf {
   uint32       seq_end;        // metadata: sequence ket thuc cua segment
   int          retransmitted;  // karn: 1 neu segment da bi gui lai (khong dung de do rtt)
   uint32       send_tick;      // tick luc gui lan dau, dung do rtt
+  // tuan 5: dau thoi gian do phan giai us cho rtt va delivery rate (BBR)
+  uint64       send_us;          // thoi diem gui lan dau (us)
+  uint64       tx_delivered;     // pcb->delivered luc gui segment nay
+  uint64       tx_delivered_us;  // pcb->delivered_us luc gui segment nay
+  uint64       tx_first_sent_us; // pcb->first_sent_us luc gui segment nay
   char         buf[MBUF_SIZE]; // vung dem chua du lieu
 };
 
@@ -226,6 +231,19 @@ struct tcp_pcb {
   uint32 dupack_cnt;  // Dem duplicate ACKs
   uint32 recover;     // Sequence number danh dau ket thuc Fast Recovery
 
+  // do thoi gian do phan giai us (tuan 5 - TV1, ha tang cho Google BBR)
+  uint32 latest_rtt_us;     // mau rtt gan nhat (us, theo quy tac karn)
+  uint32 min_rtt_us;        // rtt nho nhat trong cua so truot 10 giay
+  uint64 min_rtt_stamp_us;  // thoi diem ghi nhan min_rtt_us
+  int    min_rtt_expired;   // 1 neu mau gan nhat lam min_rtt het han 10s (-> BBR PROBE_RTT)
+  uint32 rtt_samples;       // so mau rtt hop le
+  uint64 delivered;         // tong so byte da duoc ack (tich luy)
+  uint64 delivered_us;      // thoi diem delivered thay doi gan nhat
+  uint64 first_sent_us;     // thoi diem gui cua segment moi nhat duoc ack
+  uint32 delivery_rate;     // mau toc do chuyen phat gan nhat (bytes/s)
+  uint32 rate_interval_us;  // do dai khoang do cua mau delivery_rate
+  uint32 rate_delivered;    // so byte chuyen phat trong khoang do do
+
   // tuy chon window scale (RFC 7323)
   uint8 snd_wscale;          // scale factor tu peer
   uint8 rcv_wscale;          // scale factor cua xv6
@@ -254,6 +272,10 @@ struct tcp_stat {
   uint32 rcv_wnd;
   uint32 dupack_cnt;
   int    backoff;
+  // tuan 5: thong so thoi gian do phan giai us
+  uint32 rtt_us;         // mau rtt gan nhat (us)
+  uint32 min_rtt_us;     // min rtt cua so truot 10s (us)
+  uint32 delivery_rate;  // bytes/s
 };
 #endif
 
@@ -313,6 +335,28 @@ void tcp_send_rst(uint32 local_ip, uint16 local_port, uint32 remote_ip,
                   uint8 in_flags, int in_datalen);
 void tcp_timer_tick(void);
 void tcp_timer_process(void);
+
+// do thoi gian us, min rtt 10s va delivery rate (kernel/tcp_timer.c, tuan 5)
+#define TCP_MIN_RTT_WIN_US 10000000ULL // cua so truot min_rtt: 10 giay
+
+// mau do lay tu segment moi nhat duoc ack (chua tung gui lai - quy tac karn)
+struct tcp_rate_sample {
+  uint64 send_us;          // thoi diem gui segment
+  uint64 prior_delivered;  // pcb->delivered luc gui
+  uint64 prior_us;         // pcb->delivered_us luc gui
+  uint64 first_sent_us;    // pcb->first_sent_us luc gui
+};
+
+uint64 tcp_now_us(void);
+void   tcp_rate_init(struct tcp_pcb *pcb);
+void   tcp_rate_on_send(struct tcp_pcb *pcb, struct mbuf *seg);
+void   tcp_rate_snapshot(struct mbuf *seg, struct tcp_rate_sample *rs);
+int    tcp_rate_on_ack(struct tcp_pcb *pcb, uint32 acked, uint64 now_us,
+                       struct tcp_rate_sample *rs);
+int    tcp_update_min_rtt(struct tcp_pcb *pcb, uint32 rtt_us, uint64 now_us);
+uint32 tcp_get_min_rtt_us(struct tcp_pcb *pcb);
+int    tcp_min_rtt_expired(struct tcp_pcb *pcb, uint64 now_us);
+void   tcp_timer_selftest(void);
 
 // kiem soat tac nghen (kernel/tcp_cc.c)
 void tcp_cc_init(struct tcp_pcb *pcb);

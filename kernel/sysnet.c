@@ -190,12 +190,20 @@ sys_netstat(void)
   if (max_entries > 32)
     max_entries = 32;
 
-  struct tcp_stat kstats[32];
+  // tuan 5: tcp_stat da them rtt_us/min_rtt_us/delivery_rate -> 32 entry ~2.3 KB.
+  // khong dat tren kernel stack (chi 1 trang, con phai chua ngat e1000 long vao)
+  // ma muon 1 trang rieng tu kalloc.
+  struct tcp_stat *kstats = (struct tcp_stat *)kalloc();
+  if (!kstats)
+    return -1;
   int count = tcp_get_stats(kstats, max_entries);
   if (count > 0) {
-    if (either_copyout(1, uaddr, (void *)kstats, count * sizeof(struct tcp_stat)) < 0)
+    if (either_copyout(1, uaddr, (void *)kstats, count * sizeof(struct tcp_stat)) < 0) {
+      kfree((void *)kstats);
       return -1;
+    }
   }
+  kfree((void *)kstats);
 
   return count;
 }

@@ -28,6 +28,11 @@ void
 trapinithart(void)
 {
   w_stvec((uint64)kernelvec);
+
+  // cho phep user-mode doc truc tiep cycle/time/instret (benchmark
+  // read/write vs sendfile, cong cu hwclock) - can bit tuong ung trong
+  // mcounteren da bat o start.c
+  w_scounteren(r_scounteren() | COUNTEREN_CY | COUNTEREN_TM | COUNTEREN_IR);
 }
 
 //
