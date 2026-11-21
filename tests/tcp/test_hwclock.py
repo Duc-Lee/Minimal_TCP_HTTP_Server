@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-# kiem tra hardware timer (rdcycle, r_time), rtt us va delivery_rate
-
 import os
 import re
 import subprocess

@@ -1,5 +1,3 @@
-# helper doc va parse response http
-
 def read_http_response(s, expected_bytes=0):
     data = b""
     while b"\r\n\r\n" not in data:

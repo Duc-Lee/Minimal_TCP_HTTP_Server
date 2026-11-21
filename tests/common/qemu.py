@@ -1,5 +1,3 @@
-# quan ly tien trinh qemu va ket noi mang dung chung cho cac bai test
-
 import os
 import socket
 import subprocess

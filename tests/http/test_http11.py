@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-# kiem tra http/1.1 keep-alive va worker pool
-
 from concurrent.futures import ThreadPoolExecutor
 import os
 import socket

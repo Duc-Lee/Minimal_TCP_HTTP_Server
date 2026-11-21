@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-# kiem tra tai song song va ro ri pool mbuf
-
 import argparse
 import os
 import re

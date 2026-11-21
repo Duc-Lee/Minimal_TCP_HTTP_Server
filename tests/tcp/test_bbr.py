@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-# so sanh hieu nang tcp reno vs google bbr khi mat goi 10%
-
 import os
 import subprocess
 import sys
