@@ -152,18 +152,18 @@ def main():
 
     failed = 0
     for name, fn in tests:
-        print(f"{name:<28} ... ", end="", flush=True)
+        print(f"{name}:", end=" ", flush=True)
         if fn():
-            print("OK")
+            print("ok")
         else:
-            print("FAILED")
+            print("fail")
             failed += 1
 
     if failed == 0:
-        print(f"\nAll {len(tests)} tests passed.")
+        print("all tests passed")
         sys.exit(0)
     else:
-        print(f"\n{failed}/{len(tests)} tests failed.")
+        print(f"{failed}/{len(tests)} tests failed")
         sys.exit(1)
 
 if __name__ == "__main__":

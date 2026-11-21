@@ -136,7 +136,6 @@ def test_worker_concurrency():
     print("ok")
 
 def main():
-    print("kiem thu http11 + worker pool tuan 4")
     proc = None
     try:
         s = socket.create_connection((HOST, PORT), timeout=0.5)

@@ -47,12 +47,12 @@ def main():
         sys.exit(1)
 
     try:
-        print("1. Chay cong cu hwclock trong xv6 (kiem tra rdcycle, r_time, hieu chuan, don dieu)...")
+        print("kiem tra hwclock:", flush=True)
         proc.stdin.write(b"hwclock\n")
         proc.stdin.flush()
         time.sleep(4.5)
 
-        print("2. Khoi dong httpd & (background) va tai largefile.bin (1 MB) kem do rtt_us / min_rtt_us / delivery_rate...")
+        print("kiem tra rtt va delivery_rate:", flush=True)
         proc.stdin.write(b"httpd &\n")
         proc.stdin.flush()
         time.sleep(1.5)
@@ -73,7 +73,7 @@ def main():
         proc.stdin.flush()
 
         out, _ = curl_proc.communicate(timeout=35)
-        print("   curl largefile.bin -> %s" % out.strip())
+        print("  curl:", out.strip())
         time.sleep(2.0)
         proc.stdin.write(b"hwclock rtt 1\nnetstat -d\n")
         proc.stdin.flush()
@@ -87,33 +87,6 @@ def main():
         log.close()
 
     text = read_log()
-    print("\n=== LOG TRICH XUAT TU CONSOLE XV6 ===")
-    for line in text.splitlines():
-        if any(
-            k in line
-            for k in [
-                "hwclock:",
-                "tcp_timer: selftest",
-                "== hwclock",
-                "timebase",
-                "time hien tai",
-                "cycle hien tai",
-                "instret",
-                "== hieu chuan",
-                "xv6 ticks",
-                "dong ho time",
-                "ty le",
-                "== do phan giai",
-                "== kiem tra don dieu",
-                "time  lui:",
-                "cycle lui:",
-                "== benchmark memmove",
-                "bang thong copy",
-                "rtt_us=",
-                "tcp[",
-            ]
-        ):
-            print("  " + line)
 
     failures = []
     if "hwclock: timebase=10000000 Hz" not in text:
@@ -143,11 +116,10 @@ def main():
     if len(fields) < 2 or fields[0] != "200" or fields[1] != str(LARGE_SIZE):
         failures.append("tai largefile.bin that bai: %s" % out.strip())
 
-    print("\n=== KET QUA KIEM THU TUAN 5 (TV1) ===")
     if failures:
-        print("FAIL: " + "; ".join(failures))
+        print("fail: " + "; ".join(failures))
         sys.exit(1)
-    print("PASS: Tat ca kiem thu rdcycle, r_time, 10s min_rtt window va delivery_rate thanh cong!")
+    print("pass")
 
 
 if __name__ == "__main__":

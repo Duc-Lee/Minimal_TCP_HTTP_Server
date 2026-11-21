@@ -44,7 +44,8 @@ OBJS = \
   $K/tcp_cc.o \
   $K/ringbuf.o \
   $K/sock.o \
-  $K/sysnet.o
+  $K/sysnet.o \
+  $K/sendfile.o
 
 # riscv64-unknown-elf- or riscv64-linux-gnu-
 # perhaps in /opt/riscv/bin
@@ -172,6 +173,7 @@ UPROGS=\
 	$U/_setcc\
 	$U/_netstat\
 	$U/_hwclock\
+	$U/_tcptrace\
 
 fs.img: mkfs/mkfs README $(UPROGS) user/largefile.bin user/index.html
 	mkfs/mkfs fs.img README $(UPROGS) user/largefile.bin user/index.html

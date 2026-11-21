@@ -70,50 +70,39 @@ def main():
         sys.exit(1)
 
     try:
-        print("=================================================================")
-        print(" BENCHMARK KIEM SOAT TAC NGHEN: TCP RENO vs GOOGLE BBR (LOSS 10%)")
-        print("=================================================================\n")
-
-        # Khoi dong httpd & trong background
         proc.stdin.write(b"httpd &\n")
         proc.stdin.flush()
         time.sleep(1.0)
 
-        # -------------------------------------------------------------
-        # 1. TEST TCP RENO (setcc 0, setloss 10)
-        # -------------------------------------------------------------
-        print(">>> [1/2] Kiem thu TCP Reno duoi moi truong mat goi 10%...")
+        # 1. test reno
+        print("test reno (loss 10%):")
         proc.stdin.write(b"setcc 0\nsetloss 10\n")
         proc.stdin.flush()
         time.sleep(1.0)
 
         rc_reno, out_reno, elapsed_reno = curl_download(DL_RENO_PATH, timeout=60)
-        print(f"    curl ket qua: {out_reno} (thoi gian thuc: {elapsed_reno:.3f} s)")
-
         size_reno = os.path.getsize(DL_RENO_PATH) if os.path.exists(DL_RENO_PATH) else 0
         if rc_reno != 0 or size_reno != FILE_SIZE:
-            print(f"[-] LOI: Reno khong tai du file 1 MB (kich thuoc: {size_reno} bytes, rc={rc_reno})")
+            print(f"fail: reno khong tai du file ({size_reno} bytes, rc={rc_reno})")
             sys.exit(1)
-        print(f"    [+] Reno hoan thanh 100% file ({size_reno} bytes) trong {elapsed_reno:.3f} s\n")
+        bw_reno = (FILE_SIZE / (1024 * elapsed_reno)) if elapsed_reno > 0 else 0
+        print(f"  reno: {elapsed_reno:.2f}s, {bw_reno:.1f} KB/s")
 
         time.sleep(1.5)
 
-        # -------------------------------------------------------------
-        # 2. TEST GOOGLE BBR (setcc 1, setloss 10)
-        # -------------------------------------------------------------
-        print(">>> [2/2] Kiem thu Google BBR duoi moi truong mat goi 10%...")
+        # 2. test bbr
+        print("test bbr (loss 10%):")
         proc.stdin.write(b"setcc 1\nsetloss 10\n")
         proc.stdin.flush()
         time.sleep(1.0)
 
         rc_bbr, out_bbr, elapsed_bbr = curl_download(DL_BBR_PATH, timeout=60)
-        print(f"    curl ket qua: {out_bbr} (thoi gian thuc: {elapsed_bbr:.3f} s)")
-
         size_bbr = os.path.getsize(DL_BBR_PATH) if os.path.exists(DL_BBR_PATH) else 0
         if rc_bbr != 0 or size_bbr != FILE_SIZE:
-            print(f"[-] LOI: BBR khong tai du file 1 MB (kich thuoc: {size_bbr} bytes, rc={rc_bbr})")
+            print(f"fail: bbr khong tai du file ({size_bbr} bytes, rc={rc_bbr})")
             sys.exit(1)
-        print(f"    [+] BBR hoan thanh 100% file ({size_bbr} bytes) trong {elapsed_bbr:.3f} s\n")
+        bw_bbr = (FILE_SIZE / (1024 * elapsed_bbr)) if elapsed_bbr > 0 else 0
+        print(f"  bbr: {elapsed_bbr:.2f}s, {bw_bbr:.1f} KB/s")
 
         proc.stdin.write(b"netstat -d\n")
         proc.stdin.flush()
@@ -127,29 +116,12 @@ def main():
             proc.kill()
         log.close()
 
-    # Tinh toan ty le tang toc (Speedup)
     speedup = elapsed_reno / elapsed_bbr if elapsed_bbr > 0 else 1.0
-    bw_reno = (FILE_SIZE / (1024 * elapsed_reno)) if elapsed_reno > 0 else 0
-    bw_bbr = (FILE_SIZE / (1024 * elapsed_bbr)) if elapsed_bbr > 0 else 0
-
-    print("=================================================================")
-    print("                    BANG SO SANH HIỆU NĂNG                       ")
-    print("=================================================================")
-    print(f"  Thuật toán        | Thời gian tải (1 MB) | Băng thông (KB/s) | Trạng thái")
-    print(f"--------------------+----------------------+-------------------+-----------")
-    print(f"  TCP Reno (setcc 0)| {elapsed_reno:8.3f} giây      | {bw_reno:8.1f} KB/s  | 100% PASS")
-    print(f"  Google BBR(setcc 1)| {elapsed_bbr:8.3f} giây      | {bw_bbr:8.1f} KB/s  | 100% PASS")
-    print(f"--------------------+----------------------+-------------------+-----------")
-    print(f"  HIỆU QUẢ CẢI THIỆN: Google BBR nhanh hơn Reno gấp {speedup:.2f}x lần!")
-    print("=================================================================\n")
-
-    # Kiem tra tieu chi tuan 5
-    if speedup >= 1.5:
-        print(f"[PASS] Google BBR tang toc {speedup:.2f}x (yeu cau >= 1.5x) khi mat goi 10%!")
-        sys.exit(0)
-    else:
-        print(f"[NOTE] Speedup {speedup:.2f}x.")
-        sys.exit(0)
+    print(f"speedup: {speedup:.2f}x")
+    if speedup < 1.5:
+        print(f"fail: speedup {speedup:.2f}x < 1.5x")
+        sys.exit(1)
+    print("pass")
 
 
 if __name__ == "__main__":

@@ -117,6 +117,7 @@ int get_loss_rate(void);
 int netstat(void *buf, int max_entries);
 int set_cc(int algo);
 int get_cc(void);
+int sendfile(int out_fd, int in_fd, uint64 offset, int count);
 
 #define AF_INET     2
 #define SOCK_STREAM 1

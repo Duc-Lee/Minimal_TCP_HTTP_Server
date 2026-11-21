@@ -113,6 +113,7 @@ extern uint64 sys_get_loss_rate(void);
 extern uint64 sys_netstat(void);
 extern uint64 sys_set_cc(void);
 extern uint64 sys_get_cc(void);
+extern uint64 sys_sendfile(void);
 
 // An array mapping syscall numbers from syscall.h
 // to the function that handles the system call.
@@ -150,6 +151,7 @@ static uint64 (*syscalls[])(void) = {
   [SYS_netstat]       = sys_netstat,
   [SYS_set_cc]        = sys_set_cc,
   [SYS_get_cc]        = sys_get_cc,
+  [SYS_sendfile]      = sys_sendfile,
   // clang-format on
 };
 

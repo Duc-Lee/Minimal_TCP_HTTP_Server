@@ -67,9 +67,7 @@ def run_round(round_no, conns, timeout, readme_size):
         good = (len(fields) >= 2 and fields[0] == "200"
                 and fields[1] == str(expect))
         ok += good
-        print("  dot %d / conn %d %-13s -> %s %s" %
-              (round_no, idx + 1, path, out.strip() or "(timeout)",
-               "OK" if good else "FAIL"), flush=True)
+        print(f"  conn {idx + 1} {path} -> {out.strip() or 'timeout'} ({'ok' if good else 'fail'})", flush=True)
     return ok
 
 
@@ -84,7 +82,7 @@ def main():
     args = ap.parse_args()
 
     if not os.path.exists("kernel/kernel") or not os.path.exists("fs.img"):
-        print("Chua build. Chay: make kernel/kernel fs.img")
+        print("chua build: chay make kernel/kernel fs.img")
         sys.exit(2)
     readme_size = os.path.getsize("README")
 
@@ -94,7 +92,7 @@ def main():
     time.sleep(2.5)
     if proc.poll() is not None:
         log.flush()
-        print("QEMU khong khoi dong duoc (cong 20080 bi chiem?). Log:")
+        print("qemu loi:")
         print(read_log())
         sys.exit(1)
 
@@ -109,8 +107,7 @@ def main():
     for r in range(1, args.rounds + 1):
         log.flush()
         last_round_log_pos = len(read_log())
-        print("Dot %d: %d ket noi dong thoi (loss %d%%)" %
-              (r, args.conns, args.loss), flush=True)
+        print(f"dot {r}: {args.conns} ket noi (loss {args.loss}%)", flush=True)
         ok += run_round(r, args.conns, args.timeout, readme_size)
     elapsed = time.time() - t0
 
@@ -136,15 +133,15 @@ def main():
 
     failures = []
     print()
-    print("=== KET QUA ===")
-    print("Request thanh cong: %d/%d (%.1f s)" % (ok, total, elapsed))
+    print("ket qua:")
+    print("request thanh cong: %d/%d (%.1f s)" % (ok, total, elapsed))
     if ok != total:
         failures.append("co request that bai")
 
     if re.search(r"panic", text):
         failures.append("kernel panic")
     if "[mbuf] BUG double free" in text:
-        failures.append("phat hien double free mbuf")
+        failures.append("double free mbuf")
 
     m_ring = re.search(r"e1000: rx_ring=(\d+) tx_ring=(\d+)", text)
     idle_all = re.findall(r"\[mbuf\] idle: free=(\d+)/(\d+), burst_used=(\d+)",
@@ -152,37 +149,35 @@ def main():
     idle_after = re.findall(r"\[mbuf\] idle: free=(\d+)/(\d+), burst_used=(\d+)",
                             text[audit_log_pos:])
     if not m_ring:
-        failures.append("khong thay dong 'e1000: rx_ring=' (kernel cu?)")
+        failures.append("khong thay rx_ring trong log")
     elif not idle_after:
-        failures.append("pool mbuf khong ve muc idle sau dot cuoi (nghi ro ri)")
+        failures.append("pool mbuf khong ve idle sau dot cuoi")
     else:
         rx_ring = int(m_ring.group(1))
         free, nmbuf, _ = map(int, idle_after[-1])
         max_used = max(int(u) for _, _, u in idle_all)
         expect = nmbuf - rx_ring
-        print("Pool mbuf sau dot cuoi: free=%d/%d (mong doi %d = NMBUF - "
-              "rx_ring), max_burst_used=%d" % (free, nmbuf, expect, max_used))
+        print(f"pool mbuf: free={free}/{nmbuf} (ky vong {expect}), max_burst={max_used}")
         if free != expect:
-            failures.append("mbuf_free_count = %d != %d -> ro ri %d mbuf" %
-                            (free, expect, expect - free))
+            failures.append("ro ri %d mbuf" % (expect - free))
 
     min_frees = [int(x) for x in re.findall(r"min_free=(\d+)", text)]
     if min_frees:
-        print("min_free thap nhat quan sat: %d" % min(min_frees))
-    for label, pat in [("Low watermark", r"\[mbuf\] WARN low watermark"),
-                       ("Recovered", r"\[mbuf\] recovered"),
-                       ("Pool empty", r"\[mbuf\] WARN pool empty"),
-                       ("RX drop (no mbuf)", r"\[e1000\] WARN rx drop"),
-                       ("RX overrun", r"\[e1000\] WARN rx overrun"),
-                       ("TX ring full", r"\[e1000\] WARN tx ring full")]:
+        print("min_free thap nhat: %d" % min(min_frees))
+    for label, pat in [("low watermark", r"\[mbuf\] WARN low watermark"),
+                       ("recovered", r"\[mbuf\] recovered"),
+                       ("pool empty", r"\[mbuf\] WARN pool empty"),
+                       ("rx drop", r"\[e1000\] WARN rx drop"),
+                       ("rx overrun", r"\[e1000\] WARN rx overrun"),
+                       ("tx ring full", r"\[e1000\] WARN tx ring full")]:
         n = len(re.findall(pat, text))
-        print("  %-18s: %d dong log" % (label, n))
+        if n > 0:
+            print(f"  {label}: {n}")
 
-    print("Log console day du: %s" % LOG_PATH)
     if failures:
-        print("FAIL: " + "; ".join(failures))
+        print("fail: " + "; ".join(failures))
         sys.exit(1)
-    print("PASS")
+    print("pass")
 
 
 if __name__ == "__main__":

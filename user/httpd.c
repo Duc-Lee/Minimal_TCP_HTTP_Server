@@ -242,19 +242,23 @@ handle_http_client(int client_fd)
     // gui toan bo header trong mot lan write duy nhat
     write(client_fd, hdr, hlen);
 
-    // truyen du lieu noi dung file theo khoi 4KB
+    // truyen noi dung file: uu tien dung zero-copy sendfile
     if (!is_head) {
-      int bytes_read;
-      while ((bytes_read = read(file_fd, file_buf, sizeof(file_buf))) > 0) {
-        int bytes_sent = 0;
-        while (bytes_sent < bytes_read) {
-          int w = write(client_fd, file_buf + bytes_sent, bytes_read - bytes_sent);
-          if (w <= 0)
+      int sent = sendfile(client_fd, file_fd, 0, st.size);
+      if (sent < 0) {
+        // neu sendfile loi thi fallback ve doc ghi truyen thong
+        int bytes_read;
+        while ((bytes_read = read(file_fd, file_buf, sizeof(file_buf))) > 0) {
+          int bytes_sent = 0;
+          while (bytes_sent < bytes_read) {
+            int w = write(client_fd, file_buf + bytes_sent, bytes_read - bytes_sent);
+            if (w <= 0)
+              break;
+            bytes_sent += w;
+          }
+          if (bytes_sent < bytes_read)
             break;
-          bytes_sent += w;
         }
-        if (bytes_sent < bytes_read)
-          break;
       }
     }
 
