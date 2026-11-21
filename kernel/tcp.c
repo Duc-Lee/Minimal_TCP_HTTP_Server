@@ -344,6 +344,10 @@ tcp_get_stats(struct tcp_stat *stats, int max_entries)
     stats[count].rtt_us = pcb->latest_rtt_us;
     stats[count].min_rtt_us = pcb->min_rtt_us;
     stats[count].delivery_rate = pcb->delivery_rate;
+    stats[count].cc_algo = pcb->cc_algo;
+    stats[count].bbr_state = pcb->bbr_state;
+    stats[count].max_bw = pcb->bbr_max_bw;
+    stats[count].bdp = pcb->bbr_bdp;
     release(&pcb->lock);
 
     count++;
@@ -380,10 +384,28 @@ tcp_dump_stats(void)
            (pcb->remote_ip >> 24) & 0xff, (pcb->remote_ip >> 16) & 0xff,
            (pcb->remote_ip >> 8) & 0xff, pcb->remote_ip & 0xff, pcb->remote_port,
            pcb->cwnd, pcb->ssthresh, pcb->srtt >> 3, pcb->rto);
-    printk("tcp[%d]:   rtt_us=%d min_rtt_us=%d delivered=%lu rate=%dB/s samples=%d\n",
-           i, pcb->latest_rtt_us, pcb->min_rtt_us, pcb->delivered,
+    printk("tcp[%d]:   cc=%s(%d) bbr_st=%d bdp=%d max_bw=%d rtt_us=%d min_rtt_us=%d delivered=%lu rate=%dB/s samples=%d\n",
+           i, pcb->cc_algo == CC_BBR ? "BBR" : "Reno", pcb->cc_algo,
+           pcb->bbr_state, pcb->bbr_bdp, pcb->bbr_max_bw,
+           pcb->latest_rtt_us, pcb->min_rtt_us, pcb->delivered,
            pcb->delivery_rate, pcb->rtt_samples);
     release(&pcb->lock);
+  }
+  release(&tcp_mgr.lock);
+}
+
+// cap nhat thuat toan kiem soat tac nghen cho tat ca cac ket noi dang hoat dong
+void
+tcp_pcb_update_cc(int algo)
+{
+  acquire(&tcp_mgr.lock);
+  for (int i = 0; i < TCP_PCB_POOL_SIZE; i++) {
+    struct tcp_pcb *pcb = &tcp_mgr.pcbs[i];
+    if (pcb->state != TCP_CLOSED) {
+      acquire(&pcb->lock);
+      pcb->cc_algo = algo;
+      release(&pcb->lock);
+    }
   }
   release(&tcp_mgr.lock);
 }

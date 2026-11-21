@@ -169,6 +169,7 @@ UPROGS=\
 	$U/_sync\
 	$U/_httpd\
 	$U/_setloss\
+	$U/_setcc\
 	$U/_netstat\
 	$U/_hwclock\
 

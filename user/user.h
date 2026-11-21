@@ -29,8 +29,21 @@ struct tcp_stat {
   uint32 rtt_us;         // mau rtt gan nhat (us)
   uint32 min_rtt_us;     // min rtt cua so truot 10s (us)
   uint32 delivery_rate;  // bytes/s
+  // tuan 5: thong so BBR & Congestion Control (TV2)
+  int    cc_algo;        // 0: Reno, 1: BBR
+  int    bbr_state;      // 0: STARTUP, 1: DRAIN, 2: PROBE_BW, 3: PROBE_RTT
+  uint32 max_bw;         // BBR max bandwidth (bytes/s)
+  uint32 bdp;            // BBR BDP (bytes)
 };
 #endif
+
+#define CC_RENO      0
+#define CC_BBR       1
+
+#define BBR_STARTUP   0
+#define BBR_DRAIN     1
+#define BBR_PROBE_BW  2
+#define BBR_PROBE_RTT 3
 
 // tuan 5: doc truc tiep bo dem phan cung risc-v tu user-mode
 // (kernel da bat scounteren CY|TM|IR trong trapinithart)
@@ -102,6 +115,8 @@ int connect(int sockfd, int ip, int port);
 int set_loss_rate(int rate);
 int get_loss_rate(void);
 int netstat(void *buf, int max_entries);
+int set_cc(int algo);
+int get_cc(void);
 
 #define AF_INET     2
 #define SOCK_STREAM 1

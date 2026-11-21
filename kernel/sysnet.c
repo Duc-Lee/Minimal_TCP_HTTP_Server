@@ -207,3 +207,19 @@ sys_netstat(void)
 
   return count;
 }
+
+// syscall: int set_cc(int algo) - chuyen doi thuat toan kiem soat tac nghen (0: Reno, 1: BBR)
+uint64
+sys_set_cc(void)
+{
+  int algo;
+  argint(0, &algo);
+  return tcp_set_cc_algo(algo);
+}
+
+// syscall: int get_cc(void) - lay thuat toan kiem soat tac nghen hien tai
+uint64
+sys_get_cc(void)
+{
+  return tcp_get_cc_algo();
+}

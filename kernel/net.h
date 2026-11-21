@@ -117,8 +117,16 @@ struct tcp_options {
 #define ECONNRESET   104
 #endif
 
-// tham so kiem soat tac nghen (RFC 5681 - TCP Reno)
+// tham so kiem soat tac nghen (RFC 5681 - TCP Reno, Google BBR)
 #define TCP_MSS      1400  // mss mac dinh trong xv6
+#define CC_RENO      0
+#define CC_BBR       1
+
+// cac pha trong may trang thai Google BBR
+#define BBR_STARTUP   0
+#define BBR_DRAIN     1
+#define BBR_PROBE_BW  2
+#define BBR_PROBE_RTT 3
 
 // bo dem goi tin mbuf
 struct mbuf {
@@ -225,11 +233,25 @@ struct tcp_pcb {
   int conn_err;   // loi ket noi (ECONNRESET) khi circuit breaker kich hoat
   uint32 rto_deadline;
 
-  // kiem soat tac nghen (RFC 5681 - TCP Reno)
-  uint32 cwnd;        // Congestion window (bytes)
-  uint32 ssthresh;    // Slow start threshold (bytes)
-  uint32 dupack_cnt;  // Dem duplicate ACKs
-  uint32 recover;     // Sequence number danh dau ket thuc Fast Recovery
+  // kiem soat tac nghen (RFC 5681 - TCP Reno & Google BBR - tuan 5 TV2)
+  int    cc_algo;             // CC_RENO (0) hoac CC_BBR (1)
+  uint32 cwnd;                // Congestion window (bytes)
+  uint32 ssthresh;            // Slow start threshold (bytes)
+  uint32 dupack_cnt;          // Dem duplicate ACKs
+  uint32 recover;             // Sequence number danh dau ket thuc Fast Recovery
+
+  // may trang thai Google BBR (tuan 5 TV2)
+  int    bbr_state;           // BBR_STARTUP, BBR_DRAIN, BBR_PROBE_BW, BBR_PROBE_RTT
+  uint32 bbr_max_bw;          // uoc luong bang thong cuc dai (bytes/s)
+  uint32 bbr_bdp;             // Bandwidth-Delay Product = max_bw * min_rtt (bytes)
+  uint32 bbr_target_cwnd;     // target cwnd = gain * BDP
+  int    bbr_cycle_idx;       // pha chu ky 0..7 trong PROBE_BW
+  uint64 bbr_cycle_stamp;     // thoi diem bat dau pha chu ky hien tai (us)
+  uint64 bbr_rtt_stamp;       // thoi diem bat dau PROBE_RTT (us)
+  uint64 bbr_round_delivered; // pcb->delivered tai moc round hien tai
+  uint32 bbr_round_count;     // so round da hoan thanh
+  uint32 bbr_bw_plateau_cnt;  // dem so round max_bw khong tang > 25% (STARTUP)
+  uint32 bbr_prev_max_bw;     // max_bw tai round truoc
 
   // do thoi gian do phan giai us (tuan 5 - TV1, ha tang cho Google BBR)
   uint32 latest_rtt_us;     // mau rtt gan nhat (us, theo quy tac karn)
@@ -276,6 +298,11 @@ struct tcp_stat {
   uint32 rtt_us;         // mau rtt gan nhat (us)
   uint32 min_rtt_us;     // min rtt cua so truot 10s (us)
   uint32 delivery_rate;  // bytes/s
+  // tuan 5: thong so BBR & Congestion Control (TV2)
+  int    cc_algo;        // 0: Reno, 1: BBR
+  int    bbr_state;      // 0: STARTUP, 1: DRAIN, 2: PROBE_BW, 3: PROBE_RTT
+  uint32 max_bw;         // BBR max bandwidth (bytes/s)
+  uint32 bdp;            // BBR BDP (bytes)
 };
 #endif
 
@@ -364,6 +391,9 @@ void tcp_cc_on_ack(struct tcp_pcb *pcb, uint32 ack);
 void tcp_cc_on_dup_ack(struct tcp_pcb *pcb, uint32 ack);
 void tcp_cc_on_timeout(struct tcp_pcb *pcb);
 void tcp_fast_retransmit(struct tcp_pcb *pcb);
+int  tcp_set_cc_algo(int algo);
+int  tcp_get_cc_algo(void);
+void tcp_pcb_update_cc(int algo);
 
 // ringbuf api (kernel/ringbuf.c)
 void ringbuf_init(struct ringbuf *rb);

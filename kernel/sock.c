@@ -273,8 +273,8 @@ sock_write(struct socket *s, uint64 addr, int n)
     while (pcb->state == TCP_ESTABLISHED || pcb->state == TCP_CLOSE_WAIT) {
       uint32 in_flight = pcb->snd_nxt - pcb->snd_una;
       uint32 wnd = pcb->cwnd;
-      if (wnd < 16 * TCP_MSS)
-        wnd = 16 * TCP_MSS;
+      if (wnd < 4 * TCP_MSS)
+        wnd = 4 * TCP_MSS;
       if (in_flight < wnd) {
         break;
       }

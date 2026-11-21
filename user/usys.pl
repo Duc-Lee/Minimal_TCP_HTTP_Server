@@ -51,3 +51,5 @@ entry("connect");
 entry("set_loss_rate");
 entry("get_loss_rate");
 entry("netstat");
+entry("set_cc");
+entry("get_cc");

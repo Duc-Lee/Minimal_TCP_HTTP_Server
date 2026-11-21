@@ -29,3 +29,5 @@
 #define SYS_set_loss_rate 28
 #define SYS_get_loss_rate 29
 #define SYS_netstat       30
+#define SYS_set_cc        31
+#define SYS_get_cc        32
