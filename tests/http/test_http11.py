@@ -1,10 +1,13 @@
+#!/usr/bin/env python3
+# kiem tra http/1.1 keep-alive va worker pool
+
 from concurrent.futures import ThreadPoolExecutor
 import os
 import socket
 import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from common.qemu import ensure_qemu
+from common.qemu import start_qemu, stop_qemu
 from common.http import read_http_response
 
 HOST = "127.0.0.1"
@@ -88,7 +91,7 @@ def test_worker_concurrency():
     print("ok")
 
 def main():
-    q = ensure_qemu()
+    proc = start_qemu()
     try:
         test_index_and_mime()
         test_favicon_204()
@@ -98,8 +101,7 @@ def main():
         print("all tests passed")
         return 0
     finally:
-        if q:
-            q.stop()
+        stop_qemu(proc)
 
 if __name__ == "__main__":
     sys.exit(main())

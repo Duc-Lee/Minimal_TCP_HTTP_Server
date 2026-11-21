@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+# kiem tra tai song song va pool mbuf
+
 import argparse
 import os
 import re
@@ -6,7 +9,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from common.qemu import Qemu
+from common.qemu import start_qemu, stop_qemu
 
 LOG_PATH = "/tmp/concurrent_stress.log"
 LARGE_SIZE = 1048576
@@ -29,8 +32,7 @@ def run_round(round_no, conns, timeout, readme_size):
     for idx, (p, path, expect) in enumerate(procs):
         out, _ = p.communicate()
         fields = out.strip().split()
-        good = (len(fields) >= 2 and fields[0] == "200"
-                and fields[1] == str(expect))
+        good = (len(fields) >= 2 and fields[0] == "200" and fields[1] == str(expect))
         ok += good
         print(f"  conn {idx + 1} {path} -> {out.strip() or 'timeout'} ({'ok' if good else 'fail'})", flush=True)
     return ok
@@ -45,8 +47,7 @@ def main():
     args = ap.parse_args()
 
     readme_size = os.path.getsize("README")
-    q = Qemu(log_path=LOG_PATH)
-    q.start(boot_cmd=f"setloss {args.loss}\nhttpd\n")
+    proc = start_qemu(boot_cmd=f"setloss {args.loss}\nhttpd\n", log_file=LOG_PATH)
 
     total = args.conns * args.rounds
     ok = 0
@@ -57,20 +58,23 @@ def main():
     elapsed = time.time() - t0
 
     time.sleep(args.settle)
-    audit_pos = len(q.read_log())
+    with open(LOG_PATH, "r", errors="replace") as f:
+        audit_pos = len(f.read())
+
     subprocess.run(
-        ["curl", "-s", "-o", "/dev/null", "-m", "10",
-         "http://127.0.0.1:20080/README"],
+        ["curl", "-s", "-o", "/dev/null", "-m", "10", "http://127.0.0.1:20080/README"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(0.5)
-    text = q.read_log()
-    q.stop()
+
+    with open(LOG_PATH, "r", errors="replace") as f:
+        text = f.read()
+    stop_qemu(proc)
 
     failures = []
     print("ket qua:")
     print("request thanh cong: %d/%d (%.1f s)" % (ok, total, elapsed))
     if ok != total:
-        failures.append("co request that bai")
+        failures.append("co request fail")
 
     if re.search(r"panic", text):
         failures.append("kernel panic")

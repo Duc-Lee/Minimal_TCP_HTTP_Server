@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+# kiem tra may trang thai tcp fsm
+
 import argparse
 import os
 import socket
@@ -6,7 +9,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from common.qemu import ensure_qemu
+from common.qemu import start_qemu, stop_qemu
 
 def test_handshake_and_get(host, port):
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -144,7 +147,7 @@ def main():
     parser.add_argument("--rst-port", type=int, default=20081)
     args = parser.parse_args()
 
-    q = ensure_qemu(boot_cmd="httpd\n", port=args.port)
+    proc = start_qemu("httpd\n")
     try:
         tests = [
             ("test_3way_handshake", lambda: test_handshake_and_get(args.host, args.port)),
@@ -171,8 +174,7 @@ def main():
             print(f"{failed}/{len(tests)} tests failed")
             return 1
     finally:
-        if q:
-            q.stop()
+        stop_qemu(proc)
 
 if __name__ == "__main__":
     sys.exit(main())
