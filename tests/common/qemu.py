@@ -1,5 +1,3 @@
-# helper khoi dong va tat qemu
-
 import os
 import socket
 import subprocess

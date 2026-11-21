@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # kiem tra zero-copy sendfile va truyen file tren xv6
 
+import argparse
 import hashlib
 import os
 import socket
@@ -11,24 +12,21 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from common.qemu import start_qemu, stop_qemu
 from common.http import read_http_response
 
-HOST = "127.0.0.1"
-PORT = 20080
-
-def test_sendfile_small():
+def test_sendfile_small(host, port):
     print("test_sendfile_small:", end=" ", flush=True)
-    s = socket.create_connection((HOST, PORT), timeout=5)
-    s.sendall(b"GET /README HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+    s = socket.create_connection((host, port), timeout=5)
+    s.sendall(f"GET /README HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n".encode())
     hdr, body = read_http_response(s)
     s.close()
     assert "200 OK" in hdr
     assert len(body) > 0
     print("ok")
 
-def test_sendfile_1mb():
+def test_sendfile_1mb(host, port):
     print("test_sendfile_1mb:", end=" ", flush=True)
     t0 = time.time()
-    s = socket.create_connection((HOST, PORT), timeout=15)
-    s.sendall(b"GET /largefile.bin HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+    s = socket.create_connection((host, port), timeout=15)
+    s.sendall(f"GET /largefile.bin HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n".encode())
     hdr, body = read_http_response(s, expected_bytes=1048576)
     s.close()
     t_elapsed = time.time() - t0
@@ -42,15 +40,15 @@ def test_sendfile_1mb():
     assert actual_sha == expected_sha, "sai ma sha256"
     print(f"ok ({t_elapsed:.2f}s)")
 
-def test_sendfile_keepalive():
+def test_sendfile_keepalive(host, port):
     print("test_sendfile_keepalive:", end=" ", flush=True)
-    s = socket.create_connection((HOST, PORT), timeout=10)
+    s = socket.create_connection((host, port), timeout=10)
 
-    s.sendall(b"GET /index.html HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+    s.sendall(f"GET /index.html HTTP/1.1\r\nHost: {host}\r\n\r\n".encode())
     hdr1, body1 = read_http_response(s)
     assert "200 OK" in hdr1 and len(body1) > 0
 
-    s.sendall(b"GET /README HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+    s.sendall(f"GET /README HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n".encode())
     hdr2, body2 = read_http_response(s)
     assert "200 OK" in hdr2 and len(body2) > 0
 
@@ -60,11 +58,16 @@ def test_sendfile_keepalive():
     print("ok")
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=20080)
+    args = parser.parse_args()
+
     proc = start_qemu()
     try:
-        test_sendfile_small()
-        test_sendfile_1mb()
-        test_sendfile_keepalive()
+        test_sendfile_small(args.host, args.port)
+        test_sendfile_1mb(args.host, args.port)
+        test_sendfile_keepalive(args.host, args.port)
         print("all tests passed")
         return 0
     finally:

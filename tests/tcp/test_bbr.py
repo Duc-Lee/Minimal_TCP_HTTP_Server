@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # so sanh hieu nang tcp reno vs bbr khi mat goi 10%
 
+import argparse
 import os
 import subprocess
 import sys
@@ -14,13 +15,13 @@ DL_RENO_PATH = "/tmp/dl_reno.bin"
 DL_BBR_PATH = "/tmp/dl_bbr.bin"
 FILE_SIZE = 1048576
 
-def curl_download(dest_path, timeout=60):
+def curl_download(url, dest_path, timeout=60):
     t0 = time.time()
     res = subprocess.run(
         [
             "curl", "-s", "-o", dest_path, "-m", str(timeout),
             "-w", "%{http_code} %{size_download} %{time_total}",
-            "http://127.0.0.1:20080/largefile.bin",
+            url,
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -30,6 +31,13 @@ def curl_download(dest_path, timeout=60):
     return res.returncode, res.stdout.strip(), elapsed
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=20080)
+    args = parser.parse_args()
+
+    url = f"http://{args.host}:{args.port}/largefile.bin"
+
     if os.path.exists(DL_RENO_PATH):
         os.remove(DL_RENO_PATH)
     if os.path.exists(DL_BBR_PATH):
@@ -43,7 +51,7 @@ def main():
         proc.stdin.flush()
         time.sleep(1.0)
 
-        rc_reno, _, elapsed_reno = curl_download(DL_RENO_PATH)
+        rc_reno, _, elapsed_reno = curl_download(url, DL_RENO_PATH)
         size_reno = os.path.getsize(DL_RENO_PATH) if os.path.exists(DL_RENO_PATH) else 0
         if rc_reno != 0 or size_reno != FILE_SIZE:
             print(f"fail: reno khong tai du file ({size_reno} bytes)")
@@ -59,7 +67,7 @@ def main():
         proc.stdin.flush()
         time.sleep(1.0)
 
-        rc_bbr, _, elapsed_bbr = curl_download(DL_BBR_PATH)
+        rc_bbr, _, elapsed_bbr = curl_download(url, DL_BBR_PATH)
         size_bbr = os.path.getsize(DL_BBR_PATH) if os.path.exists(DL_BBR_PATH) else 0
         if rc_bbr != 0 or size_bbr != FILE_SIZE:
             print(f"fail: bbr khong tai du file ({size_bbr} bytes)")

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # kiem tra hardware timer va rtt
 
+import argparse
 import os
 import re
 import subprocess
@@ -14,6 +15,13 @@ LOG_PATH = "/tmp/test_hwclock_bbr.log"
 LARGE_SIZE = 1048576
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=20080)
+    args = parser.parse_args()
+
+    url = f"http://{args.host}:{args.port}/largefile.bin"
+
     proc = start_qemu(boot_cmd=None, log_file=LOG_PATH)
     try:
         print("kiem tra hwclock:", flush=True)
@@ -30,7 +38,7 @@ def main():
             [
                 "curl", "-s", "-o", "/dev/null", "-m", "30",
                 "-w", "%{http_code} %{size_download} %{time_total}",
-                "http://127.0.0.1:20080/largefile.bin",
+                url,
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,

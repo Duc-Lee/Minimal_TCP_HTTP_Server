@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-# kiem tra may trang thai tcp fsm
-
 import argparse
 import os
 import socket

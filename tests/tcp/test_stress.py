@@ -14,7 +14,7 @@ from common.qemu import start_qemu, stop_qemu
 LOG_PATH = "/tmp/concurrent_stress.log"
 LARGE_SIZE = 1048576
 
-def run_round(round_no, conns, timeout, readme_size):
+def run_round(host, port, round_no, conns, timeout, readme_size):
     procs = []
     for i in range(conns):
         if i % 2 == 0:
@@ -24,7 +24,7 @@ def run_round(round_no, conns, timeout, readme_size):
         p = subprocess.Popen(
             ["curl", "-s", "-o", "/dev/null", "-m", str(timeout),
              "-w", "%{http_code} %{size_download} %{time_total}",
-             "http://127.0.0.1:20080/" + path],
+             f"http://{host}:{port}/{path}"],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
         procs.append((p, path, expect))
 
@@ -39,6 +39,8 @@ def run_round(round_no, conns, timeout, readme_size):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--port", type=int, default=20080)
     ap.add_argument("--conns", type=int, default=5)
     ap.add_argument("--rounds", type=int, default=3)
     ap.add_argument("--loss", type=int, default=0)
@@ -54,7 +56,7 @@ def main():
     t0 = time.time()
     for r in range(1, args.rounds + 1):
         print(f"dot {r}: {args.conns} ket noi (loss {args.loss}%)", flush=True)
-        ok += run_round(r, args.conns, args.timeout, readme_size)
+        ok += run_round(args.host, args.port, r, args.conns, args.timeout, readme_size)
     elapsed = time.time() - t0
 
     time.sleep(args.settle)
@@ -62,7 +64,7 @@ def main():
         audit_pos = len(f.read())
 
     subprocess.run(
-        ["curl", "-s", "-o", "/dev/null", "-m", "10", "http://127.0.0.1:20080/README"],
+        ["curl", "-s", "-o", "/dev/null", "-m", "10", f"http://{args.host}:{args.port}/README"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(0.5)
 
