@@ -10,154 +10,118 @@
 2. Nguyễn Vũ Hiệp - 20233392  
 3. Lê Anh Đức - 20233324  
 **Reported working period:**  
-from: 08/11/2026 to: 14/11/2026  
+from: 15/11/2026 to: 21/11/2026 (Tuần 5)
 
 ---
 
 ## Summary of latest progress
 
-Tuần 3 nhóm đã hoàn thành TCP Reno và chuẩn hóa RTO. Đầu Tuần 4, hệ thống còn hạn chế: server đơn tiến trình bị nghẽn khi tải file lớn, hàng đợi accept LIFO dễ treo kết nối mồ côi khi quá 5 client, ring E1000 nhỏ (16 descriptor) dễ rớt gói, cửa sổ TCP bị kẹt ở 64 KB, và buffer 1024 bytes không đủ cho header trình duyệt.
+Sau khi hoàn thiện máy chủ HTTP/1.1 và hàng đợi FIFO ở Tuần 4, hệ thống còn hai nút thắt lớn:
+* TCP Reno xem mất gói ngẫu nhiên là tắc nghẽn, liên tục chia đôi `cwnd` khiến mạng ảo giả lập rớt gói 10% bị sụt giảm thông lượng nghiêm trọng.
+* Phép đo RTT thô theo tick (100 ms) không đủ chính xác để tính toán băng thông thực tế.
+* Quá trình phục vụ file tĩnh của `httpd` tốn nhiều lần copy bộ nhớ (Disk $\rightarrow$ Kernel $\rightarrow$ User $\rightarrow$ Kernel $\rightarrow$ Card mạng), tiêu tốn chu kỳ CPU.
 
-Tuần 4 nhóm đã giải quyết xong:
-1. **Hoàng:** Tách SYN Queue và Accept Queue (FIFO), chống treo kết nối khi đầy backlog, hỗ trợ TCP Window Scale (RFC 7323) mở rộng cửa sổ vượt 64 KB.
-2. **Hiệp:** Nâng E1000 ring lên 32 descriptor, thu hồi sớm TX descriptor (`e1000_tx_reclaim`), quản lý `mbuf_pool` (512 mbuf) với bộ đếm và cảnh báo Low Watermark 10%.
-3. **Đức:** Pre-fork 4 worker pool trong `user/httpd.c`, nâng buffer lên 2048 bytes (BSS), hỗ trợ HTTP/1.1 Keep-Alive, Content-Length, route `/favicon.ico` 204 và trang chủ `index.html`.
+Trong Tuần 5, nhóm đã hoàn thành:
+1. **Phùng Huy Hoàng (TV2):** Hiện thực thuật toán điều khiển tắc nghẽn Google BBR với 4 pha (`STARTUP`, `DRAIN`, `PROBE_BW`, `PROBE_RTT`). Bổ sung syscall `set_cc`/`get_cc` và lệnh `setcc`. Khi mất gói 10%, BBR tải file 1 MB nhanh gấp **6.1x** so với Reno.
+2. **Nguyễn Vũ Hiệp (TV1):** Mở quyền thanh ghi bộ đếm phần cứng RISC-V (`rdcycle`, `r_time`), viết module `hwclock` đo RTT độ phân giải microsecond, cửa sổ trượt 10 giây `min_rtt` và bộ ước lượng `delivery_rate` phục vụ BBR.
+3. **Lê Anh Đức (TV3):** Hiện thực syscall Zero-Copy `sys_sendfile` truyền trực tiếp từ buffer cache đĩa sang `mbuf`, giảm ~35% chu kỳ CPU. Tích hợp `sendfile` vào `httpd`, viết dashboard trực quan `tcptrace` và tái cấu trúc toàn bộ thư mục `tests/` theo module.
 
-Tiến độ: đạt khoảng **85%** kế hoạch 6 tuần.
+Tiến độ: Đạt khoảng **95%** kế hoạch 6 tuần.
 
 ---
 
 ## Review of technical activities
 
-* **Activity 1 — SYN/Accept Queue & TCP Window Scale (Hoàng):**  
-  Tách riêng `syn_q` (kết nối bán phần) và `backlog_q` (FIFO qua `backlog_tail`). Sửa lỗi treo kết nối mồ côi: chỉ chuyển `ESTABLISHED` khi cấp phát socket con thành công. Viết `tcp_parse_options()` phân tích và gửi tùy chọn Window Scale (`WSCALE = 2`), mở rộng `rcv_wnd`/`snd_wnd`.
+* **Activity 1 — Google BBR & Syscall chuyển đổi thuật toán (Hoàng):**  
+  Cài đặt mô hình tắc nghẽn Kleinrock ($BDP = \text{max\_bw} \times \text{min\_rtt}$). Khi nhận 3 Dup ACK, BBR kích hoạt Fast Retransmit nhưng không cắt giảm `cwnd`. Thêm syscall `sys_set_cc(algo)` (31), `sys_get_cc()` (32) và tiện ích `user/setcc.c`.
 
-* **Activity 2 — E1000 Ring 32, TX Reclaim & Giám sát Mbuf (Hiệp):**  
-  Nâng `TX_RING_SIZE` và `RX_RING_SIZE` lên 32. Cài đặt `e1000_tx_reclaim()` giải phóng ngay mbuf đã truyền xong. Thêm `mbuf_free_count`, `min_free` và cảnh báo Low Watermark 10% (trễ hồi phục 25%). Khởi tạo lại metadata mbuf trong `mbufalloc_wait()`.
+* **Activity 2 — Bộ đếm phần cứng RISC-V & Đo RTT Microsecond (Hiệp):**  
+  Cấu hình `mcounteren` và `scounteren` mở quyền đọc `cycle`/`time` cho S-mode và U-mode. Xây dựng `kernel/hwclock.c` tự động hiệu chuẩn xung nhịp CPU theo CLINT `mtime` (10 MHz). Đo RTT microsecond theo Quy tắc Karn, quản lý cửa sổ trượt 10s `min_rtt` và tính `delivery_rate`.
 
-* **Activity 3 — Pre-fork Worker Pool & HTTP/1.1 (Đức):**  
-  Master `listen(16)` rồi `fork()` 4 worker cùng `accept()`. Đặt buffer nhận 2048 bytes và buffer đọc file 4096 bytes trên BSS chống tràn stack. Xử lý HTTP/1.1 Keep-Alive, cấp `Content-Length`, route `/favicon.ico` trả 204 No Content, nhận diện MIME types và tạo trang `index.html`.
+* **Activity 3 — Zero-Copy `sendfile`, Dashboard `tcptrace` & Refactor Test (Đức):**  
+  Syscall `sendfile(out_fd, in_fd, offset, count)` (33) đọc trực tiếp từ inode buffer cache vào payload `mbuf`, bỏ qua sao chép qua user space. Tích hợp `sendfile` vào `httpd` (có fallback). Viết công cụ `tcptrace` hiển thị trực quan ANSI/ASCII bar chart (`cwnd`, `ssthresh`, `rto`, pha BBR). Tái cấu trúc thư mục `tests/` thành `tcp/`, `http/`, `common/`.
 
 ---
 
 ## Personal contribution
 
-* **Phùng Huy Hoàng - 20233414:** Phân tách SYN/Accept Queue (FIFO), sửa lỗi treo kết nối khi đầy backlog, nâng socket table lên 32, triển khai RFC 7323 Window Scale.  
-  *Output:* `kernel/net.h`, `kernel/sock.c`, `kernel/tcp.c`, `kernel/tcp_input.c`.
+* **Phùng Huy Hoàng - 20233414:** Thuật toán Google BBR, syscall `set_cc`/`get_cc`, tiện ích `setcc`, mở rộng `netstat -d`, benchmark BBR vs Reno.  
+  *Output:* `kernel/tcp_cc.c`, `kernel/sysnet.c`, `user/setcc.c`, `tests/tcp/test_bbr.py`.
 
-* **Nguyễn Vũ Hiệp - 20233392:** Tối ưu card mạng E1000 (ring 32, thu hồi sớm TX reclaim), mở rộng cờ ngắt IMS, bộ đếm và cảnh báo Low Watermark mbuf.  
-  *Output:* `kernel/e1000.c`, `kernel/mbuf.c`.
+* **Nguyễn Vũ Hiệp - 20233392:** Phân quyền CSR bộ đếm (`mcounteren`/`scounteren`), module `hwclock.c`, đo RTT microsecond, cửa sổ trượt 10s `min_rtt`, tính `delivery_rate`, tiện ích `user/hwclock.c`.  
+  *Output:* `kernel/hwclock.c`, `kernel/tcp_timer.c`, `kernel/riscv.h`, `user/hwclock.c`, `tests/tcp/test_hwclock.py`.
 
-* **Lê Anh Đức - 20233324:** Pre-fork 4 worker pool, buffer BSS 2048 bytes, HTTP/1.1 Keep-Alive, Content-Length, favicon 204, MIME types, trang `index.html` và script `tests/test_http11.py`.  
-  *Output:* `user/httpd.c`, `user/index.html`, `Makefile`, `tests/test_http11.py`.
-
----
-
-## Developed code review
-
-### a. Algorithmic development
-* **FIFO Accept Queue:** Chuyển từ LIFO sang FIFO qua con trỏ `backlog_tail`, loại bỏ hiện tượng starvation khi nhiều kết nối tới dồn dập.
-* **TCP Window Scale (RFC 7323):** Thỏa thuận hệ số dịch bit $2$ khi bắt tay, nâng cửa sổ tối đa lên $(65535 \ll 2) = 262{,}140$ bytes.
-* **Pre-fork Worker Pool:** 4 tiến trình con cùng cạnh tranh `accept()` trên listen fd chung; vừa tải file lớn vừa nhận kết nối mới không bị block.
-* **TX Ring Reclaim:** Quét giải phóng mbuf có cờ `DD` ngay khi gửi hoặc ngắt, giảm 70% mbuf bị giữ trên card mạng.
-
-### b. Source code enhanced/revised
-* `kernel/net.h`, `kernel/sock.c`, `kernel/tcp.c`, `kernel/tcp_input.c`: Hàng đợi `syn_q`/`backlog_q`, Window Scale, bảng 32 socket.
-* `kernel/e1000.c`, `kernel/mbuf.c`: Ring 32 descriptor, `e1000_tx_reclaim()`, `mbuf_free_count`, cảnh báo Low Watermark.
-* `user/httpd.c`, `user/index.html`, `Makefile`: Pre-fork 4 worker, HTTP/1.1 keep-alive, buffer 2048B, favicon 204, nhúng index.html.
-* `tests/test_http11.py`: Test tự động 5 tiêu chí HTTP/1.1 và worker concurrency.
-
-### c. Testing result
-* **FSM (`run_tests.py`):** 6/6 kịch bản chuyển trạng thái TCP đều pass.
-* **HTTP/1.1 (`test_http11.py`):** 5/5 bài test pass (index, favicon 204, keep-alive, header dài 1.2 KB, 8 concurrent clients).
-* **Tải đồng thời (`concurrent_stress.py`):** 24/24 kết nối tải 1 MB và README thành công, pool mbuf thu hồi chuẩn 480/512 (0 rò rỉ).
-* **Trình duyệt thật:** Mở mượt mà `http://localhost:20080` trên Chrome/Firefox, không treo, không lỗi 404 favicon.
+* **Lê Anh Đức - 20233324:** Syscall Zero-Copy `sys_sendfile`, đo đạc chu kỳ CPU `rdcycle`, tích hợp `sendfile` vào `httpd`, xây dựng dashboard `user/tcptrace.c`, chuẩn hóa cấu trúc `tests/`.  
+  *Output:* `kernel/sendfile.c`, `user/httpd.c`, `user/tcptrace.c`, `tests/run_tests.py`, `tests/http/test_sendfile.py`.
 
 ---
 
-## TODO
+## Kết quả thực nghiệm và Minh chứng
 
-### a) Remaining issues
-* Đọc đĩa rồi ghi socket vẫn qua bộ nhớ user-space (tốn 2 lần copy dữ liệu).
-* Chưa có giao diện giám sát trực quan thông số TCP thời gian thực trên console xv6.
+### 1. Phùng Huy Hoàng (TV2) — Thuật toán Google BBR vs Reno (Mất gói 10%)
 
-### b) Next period tasks (Tuần 5)
-* **Đức:** Syscall Zero-Copy `sys_sendfile` đọc thẳng buffer cache đĩa sang mbuf; đo chu kỳ CPU tiết kiệm qua `rdcycle`.
-* **Hiệp:** Dashboard thời gian thực `user/tcptrace.c` dùng ANSI escape vẽ biểu đồ thanh ASCII cập nhật mỗi 500ms.
-* **Hoàng:** Nghiên cứu và mô phỏng giải thuật Google BBR so sánh hiệu năng với Reno.
+* **Benchmark so sánh tự động (`tests/tcp/test_bbr.py`):**
+  Trong điều kiện rớt gói 10% (`setloss 10`), Google BBR tải file 1 MB chỉ mất **4.05 giây** (252.4 KB/s), trong khi Reno mất **24.72 giây** (41.4 KB/s) do bị phạt giảm `cwnd`. BBR nhanh hơn Reno gấp **6.10x** (vượt chỉ tiêu $\ge 1.5x$).
+  
+  ![Benchmark BBR vs Reno loss 10%](image_doang/image.png)
 
-### c) Milestone
-Kết thúc Tuần 5: Hoàn thành `sendfile` Zero-Copy giảm ≥ 25% chu kỳ CPU và công cụ `tcptrace` trên console xv6.
-
----
-
-## Minh chứng kết quả thực nghiệm
-
-### 1. Phùng Huy Hoàng (TV1) — SYN/Accept Queue & TCP Window Scale
-
-* **8 kết nối curl đồng thời tải file qua Accept Queue FIFO:**
-  ```text
-  $ for i in {1..8}; do curl -s -o /dev/null -w "Ket noi $i: HTTP %{http_code} - %{size_download} bytes trong %{time_total}s\n" http://127.0.0.1:20080/README & done; wait
-  Ket noi 3: HTTP 200 - 6781 bytes trong 0.022687s
-  Ket noi 4: HTTP 200 - 6781 bytes trong 0.032194s
-  Ket noi 7: HTTP 200 - 6781 bytes trong 0.043163s
-  ...
-  Ket noi 6: HTTP 200 - 6781 bytes trong 0.094849s
-  ```
-  ![8 kết nối đồng thời qua FIFO Accept Queue](<image_doang/image copy.png>)
-
-* **Stress test 8 kết nối và 6 test FSM:**
-  ```text
-  $ python3 tests/concurrent_stress.py --conns 8 --rounds 1
-  Request thanh cong: 8/8 (7.6 s) | Pool mbuf: free=480/512 -> PASS
-  $ python3 tests/run_tests.py
-  All 6 tests passed.
-  ```
-  ![Stress test và FSM](<image_doang/image copy 2.png>)
+* **Quan sát trạng thái BBR trong kernel và curl tải file thực tế:**
+  Bên trái là console kernel hiển thị các pha chuyển dịch của BBR (`BBR_DRAIN`, `BBR_FAST_RETX`, `BBR_PROBE_BW`), bên phải là kiểm tra curl tải file 1 MB trực tiếp (Reno: 24.68s vs BBR: 3.67s).
+  
+  ![Kernel log BBR va curl download](<image_doang/image copy.png>)
 
 ---
 
-### 2. Nguyễn Vũ Hiệp (TV2) — E1000 Ring 32, TX Reclaim & Giám sát Mbuf
+### 2. Nguyễn Vũ Hiệp (TV1) — Bộ đếm phần cứng & Đo RTT Microsecond
 
-* **5 kết nối tải file 1 MB thật và log kernel mbuf rảnh:**
-  ```text
-  $ for i in 1 2 3 4 5; do curl -s -o /dev/null -w "conn $i: HTTP %{http_code}, %{size_download} bytes, %{time_total}s\n" http://127.0.0.1:20080/largefile.bin & done; wait
-  conn 3: HTTP 200, 1048576 bytes, 0.353209s
-  ...
-  conn 1: HTTP 200, 1048576 bytes, 1.760904s
-  ```
-  Log kernel: `[mbuf] idle: free=480/512, burst_used=6, min_free=474, alloc_fail=0`  
-  ![5 kết nối tải 1MB và thống kê mbuf](image_hiep/image.png)
-
-* **Stress test 3 đợt và boot E1000 Ring 32:**
-  ```text
-  Request thanh cong: 15/15 (3.6 s) | Pool mbuf: free=480/512 -> PASS
-  e1000: rx_ring=32 tx_ring=32 | httpd: listening on port 80
-  ```
-  ![Stress test 3 rounds và cấu hình ring 32](<image_hiep/image copy.png>)
+* **Kiểm thử bộ đếm phần cứng và RTT thực tế (`tests/tcp/test_hwclock.py`):**
+  - Hiệu chuẩn CLINT 10 MHz: 10 tick/µs, CPU đo được ~3109.6 cycle/µs.
+  - Kiểm tra 100,000 mẫu: đồng hồ `time` và `cycle` tăng đơn điệu 100% (0 lần lùi).
+  - Kết nối truyền dữ liệu thực tế đo được độ trễ chính xác: `rtt_us=157`, `min_rtt_us=46`, `rate=8708 KB/s`.
+  
+  ![Kiem tra hwclock va do RTT us](image_hiep/image.png)
 
 ---
 
-### 3. Lê Anh Đức (TV3) — Pre-fork Worker Pool, HTTP/1.1 & Trình duyệt web
+### 3. Lê Anh Đức (TV3) — Zero-Copy `sendfile`, Tiết kiệm CPU & Dashboard `tcptrace`
 
-* **Kiểm thử tự động HTTP/1.1 (`tests/test_http11.py`):**
+* **Kiểm thử toàn vẹn Zero-Copy `sendfile` (`tests/http/test_sendfile.py`):**
+  File 1 MB truyền xong trong **0.50 giây**, mã băm SHA-256 trùng khớp 100% với file gốc trên đĩa:
   ```text
-  $ python3 tests/test_http11.py
-  kiem thu http11 + worker pool tuan 4
-  test_index_and_mime: ok
-  test_favicon_204: ok
-  test_keep_alive: ok
-  test_long_headers: ok
-  test_worker_pool: ok
+  $ python3 tests/http/test_sendfile.py
+  test_sendfile_small: ok
+  test_sendfile_1mb: ok (0.50s)
+  test_sendfile_keepalive: ok
   all tests passed
   ```
-  ![Kiểm thử HTTP 1.1 và Worker Pool](image_duc/image.png)
 
-* **Stress test 24 kết nối qua 3 đợt (8 client đồng thời):**
+* **Đánh giá mức độ tiết kiệm chu kỳ CPU qua `rdcycle`:**
+
+  | Tiêu chí | Truyền thống (`read` + `write`) | Zero-Copy (`sendfile`) | Cải thiện |
+  | :--- | :--- | :--- | :--- |
+  | **Chu kỳ CPU (`rdcycle`)** | ~48,200,000 | ~31,100,000 | **Giảm 35.4%** |
+  | **Số lần gọi syscall** | 512 lần (`256 read + 256 write`) | 1 lần | **Giảm 99.8%** |
+  | **Số lần copy bộ nhớ** | 2 lần (Kernel $\leftrightarrow$ User) | 0 lần qua User | **Loại bỏ hoàn toàn copy user-space** |
+
+* **Dashboard quan sát kết nối trực tiếp `tcptrace`:**
+  Hiển thị trực quan qua mã ANSI và thanh biểu đồ ASCII trên console xv6:
   ```text
-  $ python3 tests/concurrent_stress.py --conns 8 --rounds 3
-  Request thanh cong: 24/24 (5.1 s)
-  Pool mbuf sau dot cuoi: free=480/512, min_free=470
-  Low watermark: 0 | RX drop: 0 | TX ring full: 0 -> PASS
+  tcptrace (frame 1)
+
+  conn 1: 0.0.0.0:80 -> 10.0.2.2:54321 [ESTABLISHED]
+    cc: BBR (PROBE_BW) | bw: 612 KB/s | bdp: 58240 B
+    rtt: 95 us | min_rtt: 95 us | rate: 612 KB/s
+    inflight: 1400 B | dupack: 0 | backoff: 0
+    cwnd     [####################..........] 44800 B
+    ssthresh [##############################] 65535 B
+    rto      [##............................] 200 ms
   ```
-  ![Chịu tải 24 kết nối qua 3 đợt](<image_duc/image copy 2.png>)
+
+* **Kiểm thử tích hợp runner trung tâm (`tests/run_tests.py`):**
+  ```text
+  $ python3 tests/run_tests.py core
+  >>> tests/tcp/test_state.py: ok (6/6 pass)
+  >>> tests/http/test_http11.py: ok (5/5 pass)
+  >>> tests/http/test_sendfile.py: ok (3/3 pass)
+  tat ca test deu pass
+  ```
