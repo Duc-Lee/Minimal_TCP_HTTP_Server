@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# kiem tra zero-copy sendfile va truyen file tren xv6
 
 import argparse
 import hashlib

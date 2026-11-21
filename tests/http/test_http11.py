@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# kiem tra http/1.1 keep-alive va worker pool
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor

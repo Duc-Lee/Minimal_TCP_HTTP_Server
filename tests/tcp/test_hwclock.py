@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# kiem tra hardware timer va rtt
 
 import argparse
 import os

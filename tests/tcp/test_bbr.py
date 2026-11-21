@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# so sanh hieu nang tcp reno vs bbr khi mat goi 10%
 
 import argparse
 import os
