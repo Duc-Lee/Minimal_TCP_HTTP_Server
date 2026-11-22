@@ -56,7 +56,47 @@ Tiến độ: Đạt khoảng **95%** kế hoạch 6 tuần.
 
 ---
 
-## Kết quả thực nghiệm và Minh chứng
+## Developed code review
+
+### a. Algorithmic development
+* **Google BBR Congestion Control (Hoàng):** Thay thế cơ chế AIMD của Reno bằng mô hình Kleinrock ($BDP = \text{max\_bw} \times \text{min\_rtt}$); máy trạng thái 4 pha (`STARTUP`, `DRAIN`, `PROBE_BW`, `PROBE_RTT`). Nhận 3 Dup ACKs gọi Fast Retransmit nhưng không cắt giảm `cwnd`, tránh sụt giảm thông lượng khi mạng rớt gói ngẫu nhiên.
+* **Microsecond RTT & Cửa sổ trượt 10s `min_rtt` (Hiệp):** Mở thanh ghi CSR phần cứng `cycle`/`time` qua `mcounteren`/`scounteren`; đo RTT thời gian thực microsecond (thay vì 100ms/tick); bộ lọc cửa sổ trượt 10s `min_rtt` và ước lượng `delivery_rate` cung cấp thông số đầu vào chuẩn xác cho BBR.
+* **Zero-Copy Data Transfer (Đức):** Syscall `sys_sendfile` đọc trực tiếp từ Buffer Cache của filesystem (`readi` với `user_dst = 0`) vào payload `mbuf`, truyền thẳng xuống card mạng E1000 qua `tcp_output()`, giảm từ 4 lần copy xuống còn 2 lần (DMA) + 1 lần CPU copy nội bộ kernel.
+* **Live Observability Engine (Đức):** Hệ thống giám sát thời gian thực không xâm lấn; định vị con trỏ ANSI escape `\033[2J\033[H`, chuyển đổi thông số raw từ `netstat()` thành biểu đồ thanh ASCII (`cwnd`, `ssthresh`, `rto`, pha BBR) làm mới chu kỳ 500ms.
+
+### b. Source code enhanced and/or revised
+* `kernel/tcp_cc.c`, `kernel/sysnet.c`, `user/setcc.c`: Thuật toán BBR, syscall `sys_set_cc` (31), `sys_get_cc` (32), tiện ích `setcc`.
+* `kernel/hwclock.c`, `kernel/tcp_timer.c`, `kernel/riscv.h`, `user/hwclock.c`: Khởi tạo và hiệu chuẩn clock CLINT 10 MHz, đo RTT us theo Karn, cửa sổ 10s `min_rtt`, tiện ích `hwclock`.
+* `kernel/sendfile.c`, `kernel/syscall.c`, `kernel/syscall.h`, `user/user.h`, `user/usys.pl`: Hiện thực Syscall 33 `sys_sendfile` kết nối buffer cache đĩa và socket mbuf.
+* `user/httpd.c`: Phục vụ file tĩnh qua `sendfile` với cơ chế fallback về `read/write`.
+* `user/tcptrace.c`: Dashboard trực quan hiển thị số liệu TCP/BBR thời gian thực.
+* `tests/run_tests.py`, `tests/tcp/`, `tests/http/`, `tests/common/`: Tái cấu trúc bộ test theo module, runner trung tâm, hỗ trợ tham số `--host`, `--port` linh hoạt.
+
+### c. Testing result
+* **BBR vs Reno (`tests/tcp/test_bbr.py`):** Khi mất gói 10%, BBR tải file 1 MB trong 4.05s (252.4 KB/s) so với Reno 24.72s (41.4 KB/s) $\rightarrow$ Tăng tốc **6.10x** (vượt chỉ tiêu $\ge 1.5x$).
+* **Hardware Counter & RTT (`tests/tcp/test_hwclock.py`):** Đồng hồ `cycle` và `time` tăng đơn điệu 100% qua 100,000 mẫu; đo RTT thực tế `rtt_us = 157 µs`, `min_rtt_us = 46 µs`, `rate = 8708 KB/s`.
+* **Zero-Copy sendfile (`tests/http/test_sendfile.py`):** Tải 1 MB trong 0.50s, mã băm SHA-256 trùng khớp 100% với file gốc; tiết kiệm **35.4%** chu kỳ CPU qua `rdcycle` (vượt chỉ tiêu $\ge 25\% - 40\%$).
+* **Kiểm thử hồi quy (`tests/run_tests.py core`):** 100% pass toàn bộ test FSM (6/6), HTTP/1.1 keep-alive (5/5), và sendfile (3/3).
+
+---
+
+## TODO
+
+### a) List of remaining issues
+* Cần kiểm thử stress test đồng thời với nhiều worker tải các file dung lượng khác nhau để đánh giá khả năng chịu tải cực hạn của zero-copy `sendfile`.
+* Cần chuẩn bị kịch bản demo trực tiếp cho buổi bảo vệ đồ án: chạy đồng thời máy chủ HTTP, tải file qua BBR và bật dashboard `tcptrace` trên màn hình.
+
+### b) List of tasks to carry out in the next period (Tuần 6 - Tuần cuối tổng kết & bảo vệ)
+* **Đức:** Hoàn thiện kịch bản demo hệ thống kết hợp `httpd`, `sendfile` và `tcptrace`; chuẩn bị slide thuyết trình phần Web Server & Zero-Copy.
+* **Hoàng:** Vẽ biểu đồ so sánh chi tiết hiệu năng BBR vs Reno ở các tỷ lệ mất gói khác nhau (0%, 5%, 10%); hoàn thiện báo cáo phân tích thuật toán BBR.
+* **Hiệp:** Tổng kết số liệu đo đạc xung nhịp phần cứng RISC-V và RTT microsecond; đóng gói mã nguồn hoàn chỉnh và tài liệu kỹ thuật của nhóm.
+
+### c) Milestone
+Kết thúc Tuần 6: Hoàn thành toàn bộ báo cáo tổng kết đồ án, slide bảo vệ, video demo hệ thống và sẵn sàng bảo vệ đồ án môn học.
+
+---
+
+## Minh chứng kết quả thực nghiệm
 
 ### 1. Phùng Huy Hoàng (TV2) — Thuật toán Google BBR vs Reno (Mất gói 10%)
 
