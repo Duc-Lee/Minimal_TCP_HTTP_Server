@@ -94,6 +94,7 @@ Tiến độ: Đạt khoảng **95%** kế hoạch 6 tuần.
   test_sendfile_keepalive: ok
   all tests passed
   ```
+  ![Kiem thu Zero-Copy sendfile va regression test](image_duc/image.png)
 
 * **Đánh giá mức độ tiết kiệm chu kỳ CPU qua `rdcycle`:**
 
@@ -116,6 +117,7 @@ Tiến độ: Đạt khoảng **95%** kế hoạch 6 tuần.
     ssthresh [##############################] 65535 B
     rto      [##............................] 200 ms
   ```
+  ![Dashboard quan sat truc quan tcptrace](<image_duc/image copy.png>)
 
 * **Kiểm thử tích hợp runner trung tâm (`tests/run_tests.py`):**
   ```text
