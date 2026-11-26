@@ -285,9 +285,15 @@ tcp_timer_process(void)
         }
         pcb->state = TCP_CLOSED;
         wakeup(pcb);
-        if (pcb->sock)
+        if (pcb->sock) {
           sock_push_eof((struct socket *)pcb->sock);
-        release(&pcb->lock);
+          release(&pcb->lock);
+        } else {
+          // tuan 6 (TV1): pcb mo coi (socket da dong, vd. FIN_WAIT_1/LAST_ACK
+          // mat lien tiep FIN) -> thu hoi luon, tranh pcb zombie
+          release(&pcb->lock);
+          tcp_pcb_free(pcb);
+        }
         continue;
       }
 
@@ -309,6 +315,82 @@ tcp_timer_process(void)
     }
     release(&pcb->lock);
   }
+}
+
+// tuan 6 (TV1): kiem toan tang tcp cho bien ban zero-leak.
+// dem mbuf con nam trong retransmit_q / ooo_queue cua moi pcb va phat hien
+// pcb "zombie": state CLOSED, khong con socket nao tro toi (sock == 0) nhung
+// lai khong nam trong free_list -> khong bao gio duoc thu hoi.
+void
+tcp_audit(struct net_audit *a)
+{
+  char in_free[TCP_PCB_POOL_SIZE];
+  int nfree = 0, listen = 0, conns = 0, tw = 0, zombie = 0;
+  int rtx = 0, ooo = 0;
+
+  memset(in_free, 0, sizeof(in_free));
+
+  acquire(&tcp_mgr.lock);
+  for (struct tcp_pcb *p = tcp_mgr.free_list; p; p = p->next) {
+    int idx = p - tcp_mgr.pcbs;
+    if (idx < 0 || idx >= TCP_PCB_POOL_SIZE || in_free[idx])
+      break; // free_list hong / co vong: dung de khong treo
+    in_free[idx] = 1;
+    nfree++;
+  }
+
+  for (int i = 0; i < TCP_PCB_POOL_SIZE; i++) {
+    struct tcp_pcb *pcb = &tcp_mgr.pcbs[i];
+    acquire(&pcb->lock);
+    for (struct mbuf *m = pcb->retransmit_q; m; m = m->next)
+      rtx++;
+    for (struct mbuf *m = pcb->ooo_queue; m; m = m->next)
+      ooo++;
+
+    if (!in_free[i]) {
+      if (pcb->state == TCP_LISTEN)
+        listen++;
+      else if (pcb->state == TCP_CLOSED) {
+        if (pcb->sock == 0)
+          zombie++;
+      } else {
+        conns++;
+        if (pcb->state == TCP_TIME_WAIT)
+          tw++;
+      }
+    }
+    release(&pcb->lock);
+  }
+  release(&tcp_mgr.lock);
+
+  a->tcp_pcb_total = TCP_PCB_POOL_SIZE;
+  a->tcp_pcb_free = nfree;
+  a->tcp_listen = listen;
+  a->tcp_conns = conns;
+  a->tcp_time_wait = tw;
+  a->tcp_zombie = zombie;
+  a->tcp_rtx_mbufs = rtx;
+  a->tcp_ooo_mbufs = ooo;
+}
+
+// tong hop bien ban kiem toan toan bo ngan xep mang
+void
+net_audit_collect(struct net_audit *a, int flags)
+{
+  memset(a, 0, sizeof(*a));
+  if (flags & NETAUDIT_FLUSH_ARP)
+    arp_flush();
+
+  // thu tu: cac tang giu mbuf truoc, pool sau cung de giam sai lech khi
+  // co goi dang di chuyen giua cac tang trong luc chup
+  tcp_audit(a);
+  arp_audit(a);
+  e1000_audit(a);
+  mbuf_audit(a);
+
+  a->accounted = a->mbuf_free + a->rx_ring_held + a->tx_inflight +
+                 a->arp_pending_mbufs + a->tcp_rtx_mbufs + a->tcp_ooo_mbufs;
+  a->leaked = a->mbuf_total - a->accounted;
 }
 
 // lay thong ke cac ket noi tcp dang hoat dong vao buffer

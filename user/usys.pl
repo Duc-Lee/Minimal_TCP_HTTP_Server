@@ -54,3 +54,4 @@ entry("netstat");
 entry("set_cc");
 entry("get_cc");
 entry("sendfile");
+entry("memaudit");

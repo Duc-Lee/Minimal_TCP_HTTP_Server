@@ -84,6 +84,45 @@ arp_age_tick(void)
   release(&arp_cache.lock);
 }
 
+// tuan 6: kiem toan bang arp - dem entry hop le va so mbuf dang treo
+// trong pending_queue (cac goi cho arp reply)
+void
+arp_audit(struct net_audit *a)
+{
+  int valid = 0, pend_entries = 0, pend_mbufs = 0;
+
+  acquire(&arp_cache.lock);
+  for (int i = 0; i < ARP_TABLE_SIZE; i++) {
+    struct arp_entry *e = &arp_cache.entries[i];
+    if (e->valid)
+      valid++;
+    if (e->pending_queue) {
+      pend_entries++;
+      for (struct mbuf *p = e->pending_queue; p; p = p->next)
+        pend_mbufs++;
+    }
+  }
+  release(&arp_cache.lock);
+
+  a->arp_valid = valid;
+  a->arp_pending_entries = pend_entries;
+  a->arp_pending_mbufs = pend_mbufs;
+}
+
+// tuan 6: xoa sach bang arp (giai phong moi goi dang cho, vo hieu moi entry).
+// dung khi kiem toan de chung minh bang arp khong giu mbuf nao; mac se duoc
+// hoc lai tu dong o goi tiep theo (arp_resolve -> arp request).
+void
+arp_flush(void)
+{
+  acquire(&arp_cache.lock);
+  for (int i = 0; i < ARP_TABLE_SIZE; i++) {
+    arp_drop_pending(&arp_cache.entries[i]);
+    arp_cache.entries[i].valid = 0;
+  }
+  release(&arp_cache.lock);
+}
+
 // gui arp reply ve cho host
 static void
 arp_send_reply(uint32 target_ip, uint8 *target_mac)

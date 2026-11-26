@@ -290,6 +290,59 @@ mbuffree(struct mbuf *m)
   mbuf_report(&snap);
 }
 
+// so mbuf dang ranh trong pool (doc nhanh, phuc vu kiem toan)
+int
+mbuf_free_count(void)
+{
+  acquire(&mbuf_pool.lock);
+  int n = mbuf_pool.mbuf_free_count;
+  release(&mbuf_pool.lock);
+  return n;
+}
+
+// tuan 6: kiem toan pool mbuf. khong chi tin vao bien dem mbuf_free_count ma
+// doi chieu 3 nguon doc lap:
+//   1. bien dem mbuf_free_count
+//   2. so phan tu thuc te khi duyet free_list (phat hien vong lap / mat node)
+//   3. so mbuf co ref_cnt > 0 khi quet toan bo mang mbufs[]
+// pool nhat quan khi: free_walk == free_count va refcnt_used == NMBUF - free.
+void
+mbuf_audit(struct net_audit *a)
+{
+  acquire(&mbuf_pool.lock);
+
+  int walk = 0, bad = 0;
+  for (struct mbuf *m = mbuf_pool.free_list; m; m = m->next) {
+    if (m->ref_cnt != 0)
+      bad++;
+    // free_list dai hon pool -> chac chan co vong (do double free cu)
+    if (++walk > NMBUF) {
+      bad++;
+      break;
+    }
+  }
+
+  int used = 0;
+  for (int i = 0; i < NMBUF; i++) {
+    if (mbuf_pool.mbufs[i].ref_cnt > 0)
+      used++;
+    else if (mbuf_pool.mbufs[i].ref_cnt < 0)
+      bad++;
+  }
+
+  a->mbuf_total = NMBUF;
+  a->mbuf_free = mbuf_pool.mbuf_free_count;
+  a->mbuf_free_walk = walk;
+  a->mbuf_refcnt_used = used;
+  a->mbuf_bad = bad;
+  a->mbuf_min_free = mbuf_pool.min_free;
+  a->mbuf_alloc_fail = mbuf_pool.alloc_fail;
+  a->mbuf_wait_sleeps = mbuf_pool.wait_sleeps;
+  a->mbuf_double_free = mbuf_pool.double_free;
+
+  release(&mbuf_pool.lock);
+}
+
 // day nguoc con tro head ve truoc de nhet header moi
 char *
 mbufpush(struct mbuf *m, unsigned int len)

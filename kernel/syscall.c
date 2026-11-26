@@ -114,6 +114,7 @@ extern uint64 sys_netstat(void);
 extern uint64 sys_set_cc(void);
 extern uint64 sys_get_cc(void);
 extern uint64 sys_sendfile(void);
+extern uint64 sys_memaudit(void);
 
 // An array mapping syscall numbers from syscall.h
 // to the function that handles the system call.
@@ -152,6 +153,7 @@ static uint64 (*syscalls[])(void) = {
   [SYS_set_cc]        = sys_set_cc,
   [SYS_get_cc]        = sys_get_cc,
   [SYS_sendfile]      = sys_sendfile,
+  [SYS_memaudit]      = sys_memaudit,
   // clang-format on
 };
 

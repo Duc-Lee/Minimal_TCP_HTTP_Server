@@ -65,7 +65,7 @@ tcp_cc_init(struct tcp_pcb *pcb)
   pcb->cwnd = 16 * TCP_MSS;      // Initial window (22.4 KB)
   pcb->ssthresh = 65535;         // Slow start threshold ban dau
   pcb->dupack_cnt = 0;
-  pcb->recover = 0;
+  pcb->recover = pcb->iss;
   bbr_init(pcb);
   tcp_cc_trace(pcb, "INIT");
 }
@@ -119,10 +119,20 @@ reno_on_ack(struct tcp_pcb *pcb, uint32 ack)
       // Thoat Fast Recovery, deflate cua so ve ssthresh
       pcb->cwnd = pcb->ssthresh;
       pcb->dupack_cnt = 0;
+      pcb->recover = ack;
       tcp_cc_trace(pcb, "RECOVERY_EXIT");
     }
   } else {
     pcb->dupack_cnt = 0;
+    // Sau RTO timeout trong cua so co nhieu goi bi mat (loss 20-50%):
+    // Neu ACK moi van chua vuot qua moc recover (snd_nxt luc timeout) va
+    // van con segment cu trong retransmit_q, truyen lai ngay segment dau
+    // hang doi thay vi doi them 200ms cho moi lo hong trong cung cua so.
+    if ((int32)(ack - pcb->recover) < 0 && pcb->retransmit_q) {
+      tcp_fast_retransmit(pcb);
+    } else {
+      pcb->recover = ack;
+    }
   }
 
   if (pcb->cwnd < pcb->ssthresh) {
@@ -151,7 +161,14 @@ bbr_on_ack(struct tcp_pcb *pcb, uint32 ack)
   uint32 old_cwnd = pcb->cwnd;
 
   // 1. Reset duplicate ack count khi nhan ACK moi tien bo
+  // Neu van con lo hong tiep theo trong cung cua so [ack, recover) (Partial ACK
+  // khi mat nhieu goi o muc loss 20-50%), truyen lai ngay segment dau hang doi
   pcb->dupack_cnt = 0;
+  if ((int32)(ack - pcb->recover) < 0 && pcb->retransmit_q) {
+    tcp_fast_retransmit(pcb);
+  } else {
+    pcb->recover = ack;
+  }
 
   // 2. Cap nhat bo loc max_bw (uoc luong toc do truyen cuc dai)
   if (pcb->delivery_rate > pcb->bbr_max_bw) {
@@ -293,10 +310,13 @@ tcp_cc_on_dup_ack(struct tcp_pcb *pcb, uint32 ack)
     // Khi nhan 3 Dup ACKs, lap tuc truyen lai goi bi thieu bang Fast Retransmit,
     // nhung TUYET DOI KHONG cat giam cwnd hay ssthresh, giu nguyen thong luong BDP.
     if (pcb->dupack_cnt == 3) {
+      pcb->recover = pcb->snd_nxt;
       tcp_fast_retransmit(pcb);
       tcp_cc_trace(pcb, "BBR_FAST_RETX");
       wakeup(pcb);
     } else if (pcb->dupack_cnt > 3) {
+      if ((pcb->dupack_cnt % 3) == 0)
+        tcp_fast_retransmit(pcb);
       wakeup(pcb);
     }
     return;
@@ -323,6 +343,10 @@ tcp_cc_on_dup_ack(struct tcp_pcb *pcb, uint32 ack)
     pcb->cwnd += TCP_MSS;
     if (pcb->cwnd > MAX_CWND)
       pcb->cwnd = MAX_CWND;
+    // Neu ban tin Fast Retransmit bi bo gia lap mat goi drop o muc loss cao (20-50%),
+    // moi 3 DupACK tiep theo truyen lai segment dau hang doi de khong phai cho RTO 200ms
+    if ((pcb->dupack_cnt % 3) == 0)
+      tcp_fast_retransmit(pcb);
     wakeup(pcb);
   }
 }
@@ -338,6 +362,7 @@ tcp_cc_on_timeout(struct tcp_pcb *pcb)
     tcp_fast_retransmit(pcb);
     pcb->cwnd = 4 * TCP_MSS;
     pcb->dupack_cnt = 0;
+    pcb->recover = pcb->snd_nxt;
     pcb->bbr_state = BBR_STARTUP;
     tcp_cc_trace(pcb, "BBR_TIMEOUT");
     return;

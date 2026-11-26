@@ -223,3 +223,48 @@ sys_get_cc(void)
 {
   return tcp_get_cc_algo();
 }
+
+// in bien ban kiem toan ra console kernel (memaudit(0, flags))
+static void
+net_audit_print(struct net_audit *a)
+{
+  printk("[memaudit] mbuf: total=%d free=%d walk=%d refcnt_used=%d bad=%d "
+         "min_free=%d alloc_fail=%d double_free=%d\n",
+         a->mbuf_total, a->mbuf_free, a->mbuf_free_walk, a->mbuf_refcnt_used,
+         a->mbuf_bad, a->mbuf_min_free, a->mbuf_alloc_fail,
+         a->mbuf_double_free);
+  printk("[memaudit] e1000: rx_ring=%d tx_inflight=%d loss=%d%% "
+         "tx_loss_sim=%d tx_ring_full=%d rx_nombuf=%d\n",
+         a->rx_ring_held, a->tx_inflight, a->loss_rate, a->tx_loss_sim,
+         a->tx_ring_full, a->rx_nombuf);
+  printk("[memaudit] arp: valid=%d pending_entries=%d pending_mbufs=%d\n",
+         a->arp_valid, a->arp_pending_entries, a->arp_pending_mbufs);
+  printk("[memaudit] tcp: pcb_free=%d/%d listen=%d conns=%d time_wait=%d "
+         "zombie=%d rtx_mbufs=%d ooo_mbufs=%d\n",
+         a->tcp_pcb_free, a->tcp_pcb_total, a->tcp_listen, a->tcp_conns,
+         a->tcp_time_wait, a->tcp_zombie, a->tcp_rtx_mbufs, a->tcp_ooo_mbufs);
+  printk("[memaudit] accounted=%d/%d leaked=%d\n", a->accounted,
+         a->mbuf_total, a->leaked);
+}
+
+// syscall: int memaudit(struct net_audit *buf, int flags)
+// tuan 6 (TV1): kiem toan bo nho ngan xep mang. buf == 0 -> in ra console.
+// tra ve so mbuf bi ro ri (leaked), 0 la sach.
+uint64
+sys_memaudit(void)
+{
+  uint64 uaddr;
+  int flags;
+  struct net_audit a;
+
+  argaddr(0, &uaddr);
+  argint(1, &flags);
+
+  net_audit_collect(&a, flags);
+  if (uaddr == 0) {
+    net_audit_print(&a);
+  } else if (either_copyout(1, uaddr, (void *)&a, sizeof(a)) < 0) {
+    return -1;
+  }
+  return a.leaked;
+}

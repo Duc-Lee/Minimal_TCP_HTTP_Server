@@ -118,6 +118,45 @@ int netstat(void *buf, int max_entries);
 int set_cc(int algo);
 int get_cc(void);
 int sendfile(int out_fd, int in_fd, uint64 offset, int count);
+int memaudit(void *buf, int flags);
+
+// tuan 6 (TV1): bien ban kiem toan bo nho mang, dong bo voi kernel/net.h
+#ifndef _STRUCT_NET_AUDIT_
+#define _STRUCT_NET_AUDIT_
+struct net_audit {
+  int  mbuf_total;
+  int  mbuf_free;
+  int  mbuf_free_walk;
+  int  mbuf_refcnt_used;
+  int  mbuf_bad;
+  int  mbuf_min_free;
+  uint mbuf_alloc_fail;
+  uint mbuf_wait_sleeps;
+  uint mbuf_double_free;
+  int  rx_ring_held;
+  int  tx_inflight;
+  uint tx_packets;
+  uint tx_loss_sim;
+  uint tx_ring_full;
+  uint rx_packets;
+  uint rx_nombuf;
+  int  loss_rate;
+  int  arp_valid;
+  int  arp_pending_entries;
+  int  arp_pending_mbufs;
+  int  tcp_pcb_total;
+  int  tcp_pcb_free;
+  int  tcp_listen;
+  int  tcp_conns;
+  int  tcp_time_wait;
+  int  tcp_zombie;
+  int  tcp_rtx_mbufs;
+  int  tcp_ooo_mbufs;
+  int  accounted;
+  int  leaked;
+};
+#endif
+#define NETAUDIT_FLUSH_ARP 0x1
 
 #define AF_INET     2
 #define SOCK_STREAM 1

@@ -198,6 +198,40 @@ e1000_tx_reclaim_locked(void)
   return n;
 }
 
+// tuan 6: kiem toan mbuf do driver giu.
+// thu hoi ngay cac descriptor tx da gui xong (dd=1) de khong tinh nham mbuf
+// "da gui nhung chua don" thanh ro ri, sau do dem:
+//   - rx ring: dem so slot thuc su tro toi mbuf (phai = RX_RING_SIZE)
+//   - tx ring: so slot con giu mbuf, doi chieu voi tx_inflight
+void
+e1000_audit(struct net_audit *a)
+{
+  acquire(&e1000_lock);
+  e1000_tx_reclaim_locked();
+
+  int rx_held = 0;
+  for (int i = 0; i < RX_RING_SIZE; i++)
+    if (rx_mbufs[i])
+      rx_held++;
+
+  int tx_held = 0;
+  for (int i = 0; i < TX_RING_SIZE; i++)
+    if (tx_mbufs[i])
+      tx_held++;
+
+  a->rx_ring_held = rx_held;
+  // tx_held la so mbuf that su con tro tren ring; neu lech voi tx_inflight
+  // (bug quan ly chi so) thi lay so lon hon de khong che giau ro ri
+  a->tx_inflight = tx_held > tx_inflight ? tx_held : tx_inflight;
+  a->tx_packets = e1000_stats.tx_packets;
+  a->tx_loss_sim = e1000_stats.tx_loss_sim;
+  a->tx_ring_full = e1000_stats.tx_ring_full;
+  a->rx_packets = e1000_stats.rx_packets;
+  a->rx_nombuf = e1000_stats.rx_nombuf;
+  a->loss_rate = packet_loss_rate;
+  release(&e1000_lock);
+}
+
 // truyen goi qua dma tx ring
 int
 e1000_transmit(struct mbuf *m)

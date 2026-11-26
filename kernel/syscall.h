@@ -32,3 +32,4 @@
 #define SYS_set_cc        31
 #define SYS_get_cc        32
 #define SYS_sendfile      33
+#define SYS_memaudit      34

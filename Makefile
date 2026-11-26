@@ -174,6 +174,7 @@ UPROGS=\
 	$U/_netstat\
 	$U/_hwclock\
 	$U/_tcptrace\
+	$U/_memaudit\
 
 fs.img: mkfs/mkfs README $(UPROGS) user/largefile.bin user/index.html
 	mkfs/mkfs fs.img README $(UPROGS) user/largefile.bin user/index.html

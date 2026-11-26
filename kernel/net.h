@@ -155,6 +155,16 @@ char*        mbufpull(struct mbuf *m, unsigned int len);
 char*        mbufput(struct mbuf *m, unsigned int len);
 void         mbuftrim(struct mbuf *m, unsigned int len);
 void         mbufinit(void);
+int          mbuf_free_count(void);
+
+// kiem toan bo nho mang - tuan 6 (TV1)
+struct net_audit;
+void         mbuf_audit(struct net_audit *a);
+void         e1000_audit(struct net_audit *a);
+void         arp_audit(struct net_audit *a);
+void         arp_flush(void);
+void         tcp_audit(struct net_audit *a);
+void         net_audit_collect(struct net_audit *a, int flags);
 
 // driver e1000 pci nic (kernel/e1000.c)
 void         pci_init(void);
@@ -305,6 +315,54 @@ struct tcp_stat {
   uint32 bdp;            // BBR BDP (bytes)
 };
 #endif
+
+// tuan 6 (TV1): bien ban kiem toan bo nho mang (zero memory leak).
+// moi mbuf trong pool phai nam o DUNG MOT trong cac noi sau:
+//   free_list | rx ring e1000 | tx ring e1000 | arp pending_queue |
+//   tcp retransmit_q | tcp ooo_queue
+// leaked = mbuf_total - tong cac noi tren. o trang thai nghi phai = 0.
+#ifndef _STRUCT_NET_AUDIT_
+#define _STRUCT_NET_AUDIT_
+struct net_audit {
+  // pool mbuf (kernel/mbuf.c)
+  int  mbuf_total;        // NMBUF
+  int  mbuf_free;         // bien dem mbuf_free_count
+  int  mbuf_free_walk;    // so phan tu dem duoc khi duyet free_list
+  int  mbuf_refcnt_used;  // so mbuf co ref_cnt > 0 khi quet mang mbufs[]
+  int  mbuf_bad;          // mbuf trong free_list co ref_cnt != 0 / ref_cnt < 0
+  int  mbuf_min_free;     // muc ranh thap nhat tu luc boot
+  uint mbuf_alloc_fail;
+  uint mbuf_wait_sleeps;
+  uint mbuf_double_free;
+  // driver e1000 (kernel/e1000.c)
+  int  rx_ring_held;      // mbuf gan thuong truc tren rx ring
+  int  tx_inflight;       // mbuf con nam tren tx ring sau khi reclaim
+  uint tx_packets;
+  uint tx_loss_sim;       // goi bi bo gia lap mat goi drop
+  uint tx_ring_full;
+  uint rx_packets;
+  uint rx_nombuf;
+  int  loss_rate;         // ty le mat goi hien tai (%)
+  // arp (kernel/arp.c)
+  int  arp_valid;         // so entry da co mac
+  int  arp_pending_entries;
+  int  arp_pending_mbufs; // mbuf dang cho arp reply
+  // tcp (kernel/tcp.c)
+  int  tcp_pcb_total;     // kich thuoc pool pcb
+  int  tcp_pcb_free;      // pcb nam trong free_list
+  int  tcp_listen;
+  int  tcp_conns;         // pcb khong CLOSED/LISTEN (dang ket noi)
+  int  tcp_time_wait;
+  int  tcp_zombie;        // pcb CLOSED, khong thuoc socket nao, khong o free_list
+  int  tcp_rtx_mbufs;     // mbuf trong retransmit_q
+  int  tcp_ooo_mbufs;     // mbuf trong ooo_queue
+  // tong hop
+  int  accounted;         // free + rx + tx + arp + rtx + ooo
+  int  leaked;            // mbuf_total - accounted
+};
+#endif
+
+#define NETAUDIT_FLUSH_ARP 0x1 // xoa sach bang arp truoc khi kiem toan
 
 #define RINGBUF_SIZE 4096
 

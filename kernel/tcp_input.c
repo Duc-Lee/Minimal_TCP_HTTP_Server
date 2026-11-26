@@ -238,9 +238,30 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
         q = next;
       }
       pcb->ooo_queue = 0;
+      // tuan 6 (TV1): ket noi da chet -> tra ngay cac segment cho truyen lai.
+      // truoc day retransmit_q bi bo quen: tcp_timer_process bo qua pcb
+      // CLOSED nen cac mbuf nay khong bao gio duoc giai phong.
+      struct mbuf *r = pcb->retransmit_q;
+      while (r) {
+        struct mbuf *next = r->next;
+        r->next = 0;
+        mbuffree(r);
+        r = next;
+      }
+      pcb->retransmit_q = 0;
+      pcb->rto_deadline = 0;
       wakeup(pcb);
       if (pcb->sock)
         sock_push_eof((struct socket *)pcb->sock);
+      // pcb mo coi (socket da dong: FIN_WAIT/LAST_ACK/TIME_WAIT, hoac SYN_RCVD
+      // vua go khoi syn_q) -> khong ai goi sock_close nua, phai tu thu hoi
+      // ngay, neu khong se thanh pcb zombie chiem cho trong pool vinh vien.
+      if (!pcb->sock) {
+        release(&pcb->lock);
+        mbuffree(m);
+        tcp_pcb_free(pcb);
+        return;
+      }
     }
     release(&pcb->lock);
     mbuffree(m);
