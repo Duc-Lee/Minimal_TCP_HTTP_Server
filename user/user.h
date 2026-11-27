@@ -39,6 +39,7 @@ struct tcp_stat {
 
 #define CC_RENO      0
 #define CC_BBR       1
+#define CC_BASIC     2
 
 #define BBR_STARTUP   0
 #define BBR_DRAIN     1

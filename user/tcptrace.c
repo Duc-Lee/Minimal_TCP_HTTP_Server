@@ -85,10 +85,12 @@ main(int argc, char *argv[])
         active_conns++;
 
         // thuat toan dieu khien tac nghen (CC)
-        if (st[i].cc_algo == 1) {
+        if (st[i].cc_algo == CC_BBR) {
           const char *phase = (st[i].bbr_state >= 0 && st[i].bbr_state <= 3) ? bbr_phases[st[i].bbr_state] : "BBR";
           printf("  cc: BBR (%s) | bw: %u KB/s | bdp: %u B\n",
                  phase, st[i].max_bw / 1024, st[i].bdp);
+        } else if (st[i].cc_algo == CC_BASIC) {
+          printf("  cc: Basic (Fixed Window)\n");
         } else {
           printf("  cc: Reno\n");
         }

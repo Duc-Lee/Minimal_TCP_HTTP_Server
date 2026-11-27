@@ -5,22 +5,27 @@
 static void
 usage(void)
 {
-  printf("usage: setcc [0|1|reno|bbr|status]\n");
+  printf("usage: setcc [0|1|2|reno|bbr|basic|status]\n");
+}
+
+static const char *
+cc_name(int algo)
+{
+  if (algo == CC_BBR)
+    return "BBR";
+  if (algo == CC_BASIC)
+    return "Basic";
+  return "Reno";
 }
 
 int
 main(int argc, char *argv[])
 {
-  if (argc < 2) {
+  if (argc < 2 || strcmp(argv[1], "status") == 0) {
     int cur = get_cc();
-    printf("congestion control: %s (%d)\n", cur == CC_BBR ? "BBR" : "Reno", cur);
-    usage();
-    exit(0);
-  }
-
-  if (strcmp(argv[1], "status") == 0) {
-    int cur = get_cc();
-    printf("congestion control: %s (%d)\n", cur == CC_BBR ? "BBR" : "Reno", cur);
+    printf("congestion control: %s (%d)\n", cc_name(cur), cur);
+    if (argc < 2)
+      usage();
     exit(0);
   }
 
@@ -29,6 +34,8 @@ main(int argc, char *argv[])
     algo = CC_RENO;
   } else if (strcmp(argv[1], "1") == 0 || strcmp(argv[1], "bbr") == 0 || strcmp(argv[1], "BBR") == 0) {
     algo = CC_BBR;
+  } else if (strcmp(argv[1], "2") == 0 || strcmp(argv[1], "basic") == 0 || strcmp(argv[1], "BASIC") == 0) {
+    algo = CC_BASIC;
   } else {
     printf("invalid algorithm: %s\n", argv[1]);
     usage();
@@ -40,6 +47,6 @@ main(int argc, char *argv[])
     exit(1);
   }
 
-  printf("set congestion control: %s (%d)\n", algo == CC_BBR ? "BBR" : "Reno", algo);
+  printf("set congestion control: %s (%d)\n", cc_name(algo), algo);
   exit(0);
 }

@@ -107,6 +107,12 @@ main(int argc, char *argv[])
     netstat(0, 0);
     exit(0);
   }
+  // co -t de chay tu kiem thu tinh huong bien FSM, goi rac va TIME_WAIT
+  if (argc > 1 && strcmp(argv[1], "-t") == 0) {
+    int rc = netstat(0, -1);
+    printf("netstat -t: %s\n", rc == 0 ? "PASS" : "FAIL");
+    exit(rc == 0 ? 0 : 1);
+  }
 
   struct tcp_stat stats[32];
   int count = netstat(stats, 32);

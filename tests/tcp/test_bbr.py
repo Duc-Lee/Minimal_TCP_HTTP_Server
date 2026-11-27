@@ -28,6 +28,24 @@ def curl_download(url, dest_path, timeout=60):
     elapsed = time.time() - t0
     return res.returncode, res.stdout.strip(), elapsed
 
+def run_trials(proc, url, cc_code, dest_path, trials=3):
+    times = []
+    proc.stdin.write(f"setcc {cc_code}\nsetloss 10\n".encode())
+    proc.stdin.flush()
+    time.sleep(0.8)
+
+    for _ in range(trials):
+        if os.path.exists(dest_path):
+            os.remove(dest_path)
+        rc, _, elapsed = curl_download(url, dest_path)
+        size = os.path.getsize(dest_path) if os.path.exists(dest_path) else 0
+        if rc != 0 or size != FILE_SIZE:
+            return None, size
+        times.append(elapsed)
+        time.sleep(0.6)
+    return times, FILE_SIZE
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="127.0.0.1")
@@ -41,37 +59,36 @@ def main():
     if os.path.exists(DL_BBR_PATH):
         os.remove(DL_BBR_PATH)
 
-    proc = start_qemu(boot_cmd="httpd &\n", log_file=LOG_PATH)
+    proc = start_qemu(
+        boot_cmd="httpd &\n",
+        log_file=LOG_PATH,
+        port=args.port,
+        rst_port=args.port + 1,
+    )
     try:
-        # 1. test reno
+        # 1. test reno (3 lan lay trung binh cong o muc mat goi 10%)
         print("test reno (loss 10%):")
-        proc.stdin.write(b"setcc 0\nsetloss 10\n")
-        proc.stdin.flush()
-        time.sleep(1.0)
-
-        rc_reno, _, elapsed_reno = curl_download(url, DL_RENO_PATH)
-        size_reno = os.path.getsize(DL_RENO_PATH) if os.path.exists(DL_RENO_PATH) else 0
-        if rc_reno != 0 or size_reno != FILE_SIZE:
-            print(f"fail: reno khong tai du file ({size_reno} bytes)")
+        reno_times, reno_sz = run_trials(proc, url, 0, DL_RENO_PATH, trials=3)
+        if not reno_times:
+            print(f"fail: reno khong tai du file ({reno_sz} bytes)")
             return 1
+        elapsed_reno = sum(reno_times) / len(reno_times)
         bw_reno = (FILE_SIZE / (1024 * elapsed_reno)) if elapsed_reno > 0 else 0
-        print(f"  reno: {elapsed_reno:.2f}s, {bw_reno:.1f} KB/s")
+        samples_r = ", ".join(f"{t:.2f}s" for t in reno_times)
+        print(f"  reno avg: {elapsed_reno:.2f}s, {bw_reno:.1f} KB/s (runs: {samples_r})")
 
-        time.sleep(1.5)
-
-        # 2. test bbr
-        print("test bbr (loss 10%):")
-        proc.stdin.write(b"setcc 1\nsetloss 10\n")
-        proc.stdin.flush()
         time.sleep(1.0)
 
-        rc_bbr, _, elapsed_bbr = curl_download(url, DL_BBR_PATH)
-        size_bbr = os.path.getsize(DL_BBR_PATH) if os.path.exists(DL_BBR_PATH) else 0
-        if rc_bbr != 0 or size_bbr != FILE_SIZE:
-            print(f"fail: bbr khong tai du file ({size_bbr} bytes)")
+        # 2. test bbr (3 lan lay trung binh cong o muc mat goi 10%)
+        print("test bbr (loss 10%):")
+        bbr_times, bbr_sz = run_trials(proc, url, 1, DL_BBR_PATH, trials=3)
+        if not bbr_times:
+            print(f"fail: bbr khong tai du file ({bbr_sz} bytes)")
             return 1
+        elapsed_bbr = sum(bbr_times) / len(bbr_times)
         bw_bbr = (FILE_SIZE / (1024 * elapsed_bbr)) if elapsed_bbr > 0 else 0
-        print(f"  bbr: {elapsed_bbr:.2f}s, {bw_bbr:.1f} KB/s")
+        samples_b = ", ".join(f"{t:.2f}s" for t in bbr_times)
+        print(f"  bbr avg:  {elapsed_bbr:.2f}s, {bw_bbr:.1f} KB/s (runs: {samples_b})")
 
         proc.stdin.write(b"netstat -d\n")
         proc.stdin.flush()

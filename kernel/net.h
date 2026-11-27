@@ -121,6 +121,7 @@ struct tcp_options {
 #define TCP_MSS      1400  // mss mac dinh trong xv6
 #define CC_RENO      0
 #define CC_BBR       1
+#define CC_BASIC     2
 
 // cac pha trong may trang thai Google BBR
 #define BBR_STARTUP   0
@@ -414,6 +415,7 @@ int  tcp_get_stats(struct tcp_stat *stats, int max_entries);
 void tcp_dump_stats(void);
 
 void tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip);
+int  tcp_edge_selftest(void);
 int tcp_output(struct tcp_pcb *pcb, struct mbuf *m, uint8 flags);
 void tcp_send_rst(uint32 local_ip, uint16 local_port, uint32 remote_ip,
                   uint16 remote_port, uint32 in_seq, uint32 in_ack,

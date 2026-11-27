@@ -92,6 +92,15 @@ tcp_parse_options(struct tcphdr *th, int hlen, struct tcp_options *opt)
   }
 }
 
+// giai phong mbuf, nha khoa pcb va gui lai mot goi ACK thuan
+static inline void
+tcp_discard_and_ack(struct tcp_pcb *pcb, struct mbuf *m)
+{
+  release(&pcb->lock);
+  mbuffree(m);
+  tcp_output(pcb, 0, TCP_FLAG_ACK);
+}
+
 // xu ly ack, don retransmit_q, fast retransmit va wakeup writer
 static void
 tcp_handle_ack(struct tcp_pcb *pcb, uint32 ack, uint16 win)
@@ -100,7 +109,8 @@ tcp_handle_ack(struct tcp_pcb *pcb, uint32 ack, uint16 win)
   if (pcb->wscale_ok)
     eff_win = eff_win << pcb->snd_wscale;
   pcb->snd_wnd = eff_win;
-  if ((int32)(ack - pcb->snd_una) > 0) {
+  // RFC 793 / 5681: chi chap nhan ACK hop le trong khoang (snd_una, snd_nxt]
+  if ((int32)(ack - pcb->snd_una) > 0 && (int32)(ack - pcb->snd_nxt) <= 0) {
     // giai phong segment da duoc ack
     struct mbuf **pq = &pcb->retransmit_q;
     int have_sample = 0;
@@ -187,7 +197,7 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
   uint16 win = ntohs(th->win);
 
   int hlen = (th->off >> 4) * 4;
-  if (hlen < (int)sizeof(struct tcphdr)) {
+  if (hlen < (int)sizeof(struct tcphdr) || hlen > (int)m->len) {
     mbuffree(m);
     return;
   }
@@ -284,11 +294,13 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
         }
         release(&ls->lock);
       }
+      // Nha listen pcb->lock truoc khi goi tcp_pcb_alloc / tcp_pcb_insert
+      // de tuan thu thu tu khoa tcp_mgr.lock -> pcb->lock (tranh deadlock/re-acquire)
+      release(&pcb->lock);
 
       // tao pcb moi cho ket noi den
       struct tcp_pcb *newpcb = tcp_pcb_alloc();
       if (!newpcb) {
-        release(&pcb->lock);
         mbuffree(m);
         return;
       }
@@ -300,7 +312,7 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
       newpcb->rcv_nxt = seq + 1;
       newpcb->rcv_wnd = 16384;
       newpcb->state = TCP_SYN_RCVD;
-      newpcb->sock = pcb->sock;
+      newpcb->sock = ls;
 
       // Thuong luong Window Scale (RFC 7323)
       if (opt.has_wscale) {
@@ -316,6 +328,14 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
       // Chen vao SYN Queue cua listen socket
       if (ls) {
         acquire(&ls->lock);
+        if (ls->ref_cnt <= 0 || !ls->pcb || ls->pcb->state != TCP_LISTEN ||
+            ls->syn_cnt >= ls->syn_max || ls->backlog_cnt >= ls->backlog_max) {
+          release(&ls->lock);
+          newpcb->sock = 0;
+          tcp_pcb_free(newpcb);
+          mbuffree(m);
+          return;
+        }
         newpcb->syn_next = ls->syn_q;
         ls->syn_q = newpcb;
         ls->syn_cnt++;
@@ -323,8 +343,6 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
       }
 
       tcp_pcb_insert(newpcb);
-
-      release(&pcb->lock);
       mbuffree(m);
 
       // gui syn-ack buoc 2 (se kem theo MSS va Window Scale neu wscale_ok)
@@ -369,6 +387,14 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
       return;
     }
     if (flags & TCP_FLAG_ACK) {
+      // RFC 793: Trong SYN_RCVD, ACK bat buoc phai khop chinh xac voi SYN-ACK (ack == snd_nxt)
+      if ((int32)(ack - pcb->snd_una) <= 0 || ack != pcb->snd_nxt) {
+        release(&pcb->lock);
+        tcp_send_rst(dst_ip, dport, src_ip, sport, seq, ack, flags, m->len);
+        mbuffree(m);
+        return;
+      }
+
       struct socket *ls = (struct socket *)pcb->sock;
       if (ls) {
         acquire(&ls->lock);
@@ -531,51 +557,66 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
 
     // remote dong chieu gui (FIN thuan khong co payload)
     if (flags & TCP_FLAG_FIN) {
-      pcb->rcv_nxt++;
-      pcb->state = TCP_CLOSE_WAIT;
-      if (pcb->sock)
-        sock_push_eof((struct socket *)pcb->sock);
-      release(&pcb->lock);
-      mbuffree(m);
-      tcp_output(pcb, 0, TCP_FLAG_ACK);
+      if (seq == pcb->rcv_nxt) {
+        pcb->rcv_nxt++;
+        pcb->state = TCP_CLOSE_WAIT;
+        if (pcb->sock)
+          sock_push_eof((struct socket *)pcb->sock);
+      }
+      tcp_discard_and_ack(pcb, m);
       return;
     }
     break;
 
   case TCP_FIN_WAIT_1:
-    if (flags & TCP_FLAG_ACK) {
+    if (flags & TCP_FLAG_ACK)
       tcp_handle_ack(pcb, ack, win);
-      if (flags & TCP_FLAG_FIN) {
-        pcb->rcv_nxt++;
+    if (m->len > 0 && seq == pcb->rcv_nxt) {
+      pcb->rcv_nxt += m->len;
+      seq += m->len;
+    }
+    if ((flags & TCP_FLAG_FIN) && seq == pcb->rcv_nxt) {
+      pcb->rcv_nxt++;
+      if ((int32)(pcb->snd_una - pcb->snd_nxt) >= 0) {
         pcb->state = TCP_TIME_WAIT;
         pcb->rto_deadline = ticks + 200;
-        if (pcb->sock)
-          sock_push_eof((struct socket *)pcb->sock);
-        release(&pcb->lock);
-        mbuffree(m);
-        tcp_output(pcb, 0, TCP_FLAG_ACK);
-        return;
+      } else {
+        // dong ket noi dong thoi (Simultaneous Close)
+        pcb->state = TCP_CLOSING;
       }
-      if ((int32)(ack - pcb->snd_nxt) >= 0) {
-        pcb->state = TCP_FIN_WAIT_2;
-      }
+      if (pcb->sock)
+        sock_push_eof((struct socket *)pcb->sock);
+      tcp_discard_and_ack(pcb, m);
+      return;
+    }
+    if ((flags & TCP_FLAG_ACK) && (int32)(pcb->snd_una - pcb->snd_nxt) >= 0) {
+      pcb->state = TCP_FIN_WAIT_2;
+    }
+    if (m->len > 0 || (flags & TCP_FLAG_FIN)) {
+      tcp_discard_and_ack(pcb, m);
+      return;
     }
     break;
 
   // fin_wait_2: da nhan ack cho fin cua minh, cho fin tu remote
   case TCP_FIN_WAIT_2:
-    if (flags & TCP_FLAG_ACK) {
+    if (flags & TCP_FLAG_ACK)
       tcp_handle_ack(pcb, ack, win);
+    if (m->len > 0 && seq == pcb->rcv_nxt) {
+      pcb->rcv_nxt += m->len;
+      seq += m->len;
     }
-    if (flags & TCP_FLAG_FIN) {
+    if ((flags & TCP_FLAG_FIN) && seq == pcb->rcv_nxt) {
       pcb->rcv_nxt++;
       pcb->state = TCP_TIME_WAIT;
       pcb->rto_deadline = ticks + 200; // time_wait ~2 msl
       if (pcb->sock)
         sock_push_eof((struct socket *)pcb->sock);
-      release(&pcb->lock);
-      mbuffree(m);
-      tcp_output(pcb, 0, TCP_FLAG_ACK);
+      tcp_discard_and_ack(pcb, m);
+      return;
+    }
+    if (m->len > 0 || (flags & TCP_FLAG_FIN)) {
+      tcp_discard_and_ack(pcb, m);
       return;
     }
     break;
@@ -591,7 +632,7 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
   case TCP_LAST_ACK:
     if (flags & TCP_FLAG_ACK) {
       tcp_handle_ack(pcb, ack, win);
-      if ((int32)(ack - pcb->snd_nxt) >= 0) {
+      if ((int32)(pcb->snd_una - pcb->snd_nxt) >= 0) {
         pcb->state = TCP_CLOSED;
         release(&pcb->lock);
         mbuffree(m);
@@ -599,16 +640,33 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
         return;
       }
     }
+    if ((flags & TCP_FLAG_FIN) && (int32)(seq - pcb->rcv_nxt) <= 0) {
+      tcp_discard_and_ack(pcb, m);
+      return;
+    }
     break;
 
   // closing: ca 2 ben dong cung luc
   case TCP_CLOSING:
     if (flags & TCP_FLAG_ACK) {
       tcp_handle_ack(pcb, ack, win);
-      if ((int32)(ack - pcb->snd_nxt) >= 0) {
+      if ((int32)(pcb->snd_una - pcb->snd_nxt) >= 0) {
         pcb->state = TCP_TIME_WAIT;
         pcb->rto_deadline = ticks + 200;
       }
+    }
+    if ((flags & TCP_FLAG_FIN) && (int32)(seq - pcb->rcv_nxt) <= 0) {
+      tcp_discard_and_ack(pcb, m);
+      return;
+    }
+    break;
+
+  // time_wait: cho 2 MSL va tra lai ACK neu peer gui lai FIN
+  case TCP_TIME_WAIT:
+    if ((flags & TCP_FLAG_FIN) && (int32)(seq - pcb->rcv_nxt) <= 0) {
+      pcb->rto_deadline = ticks + 200;
+      tcp_discard_and_ack(pcb, m);
+      return;
     }
     break;
 
@@ -618,4 +676,173 @@ tcp_input(struct mbuf *m, uint32 src_ip, uint32 dst_ip)
 
   release(&pcb->lock);
   mbuffree(m);
+}
+
+// tao goi tin tcp gia lap de kiem thu cac tinh huong bien va goi rac
+static void
+inject_test_tcp(uint32 src_ip, uint16 sport, uint32 dst_ip, uint16 dport,
+                uint32 seq, uint32 ack, uint8 flags, uint16 win, uint8 off,
+                int extra_len, int bad_cksum)
+{
+  struct mbuf *m = mbufalloc(MBUF_DEFAULT_HEAD);
+  if (!m)
+    return;
+  int total = (int)sizeof(struct tcphdr) + extra_len;
+  char *p = mbufput(m, total);
+  if (!p) {
+    mbuffree(m);
+    return;
+  }
+  memset(p, 0, total);
+  struct tcphdr *th = (struct tcphdr *)p;
+  th->sport = htons(sport);
+  th->dport = htons(dport);
+  th->seq = htonl(seq);
+  th->ack = htonl(ack);
+  th->off = off;
+  th->flags = flags;
+  th->win = htons(win);
+  th->cksum = tcp_checksum(m, src_ip, dst_ip);
+  if (bad_cksum)
+    th->cksum ^= 0xffff;
+  tcp_input(m, src_ip, dst_ip);
+}
+
+// tuan 6 (TV2): tu dong kiem thu cac tinh huong bien FSM, goi rac & TIME_WAIT
+int
+tcp_edge_selftest(void)
+{
+  int step = 1;
+  uint32 lip = 0x0a00020f; // 10.0.2.15
+  uint32 rip = 0x0a000263; // 10.0.2.99 (IP ao trong subnet, tranh SLIRP gui RST phan hoi)
+  uint16 lport = 50001;
+  uint16 rport = 49999;
+
+  // 1. Goi tin cut ngan (< 20 bytes) khong duoc gay loi
+  struct mbuf *tiny = mbufalloc(MBUF_DEFAULT_HEAD);
+  if (!tiny)
+    return -1;
+  mbufput(tiny, 8);
+  tcp_input(tiny, rip, lip);
+
+  // Tao PCB thu nghiem o trang thai ESTABLISHED
+  struct tcp_pcb *pcb = tcp_pcb_alloc();
+  if (!pcb)
+    return -1;
+  pcb->local_ip = lip;
+  pcb->local_port = lport;
+  pcb->remote_ip = rip;
+  pcb->remote_port = rport;
+  pcb->snd_una = 2000;
+  pcb->snd_nxt = 2100;
+  pcb->rcv_nxt = 1000;
+  pcb->rcv_wnd = 8192;
+  pcb->state = TCP_ESTABLISHED;
+  struct mbuf *dummy_rtx = mbufalloc(MBUF_DEFAULT_HEAD);
+  if (!dummy_rtx) {
+    tcp_pcb_free(pcb);
+    return -1;
+  }
+  dummy_rtx->seq_end = 2100;
+  pcb->retransmit_q = dummy_rtx;
+  tcp_pcb_insert(pcb);
+
+  // 2. Goi rac co data offset vuot qua kich thuoc goi (hlen=60, total=24)
+  step = 2;
+  inject_test_tcp(rip, rport, lip, lport, 1000, 2100, TCP_FLAG_ACK, 8192, 0xf0, 4, 0);
+  if (pcb->rcv_nxt != 1000 || pcb->state != TCP_ESTABLISHED)
+    goto fail;
+
+  // 3. Goi rac sai TCP checksum
+  step = 3;
+  inject_test_tcp(rip, rport, lip, lport, 1000, 2100, TCP_FLAG_ACK | TCP_FLAG_FIN, 8192, 0x50, 0, 1);
+  if (pcb->rcv_nxt != 1000 || pcb->state != TCP_ESTABLISHED)
+    goto fail;
+
+  // 4. Goi rac gia mao ACK vuot qua snd_nxt (ack = 2100 + 50000)
+  step = 4;
+  inject_test_tcp(rip, rport, lip, lport, 1000, 52100, TCP_FLAG_ACK, 8192, 0x50, 0, 0);
+  if (pcb->snd_una != 2000 || pcb->retransmit_q == 0)
+    goto fail;
+
+  // 5. FIN lech thu tu (seq = rcv_nxt + 500) khong duoc chuyen som sang CLOSE_WAIT
+  step = 5;
+  inject_test_tcp(rip, rport, lip, lport, 1500, 2000, TCP_FLAG_FIN | TCP_FLAG_ACK, 8192, 0x50, 0, 0);
+  if (pcb->state != TCP_ESTABLISHED || pcb->rcv_nxt != 1000)
+    goto fail;
+
+  // Giai phong retransmit_q gia lap truoc khi test cac pha dong ket noi
+  acquire(&pcb->lock);
+  mbuffree(pcb->retransmit_q);
+  pcb->retransmit_q = 0;
+  pcb->snd_una = pcb->snd_nxt;
+
+  // 6. Kiem tra SYN_RCVD tu choi ACK rac khong khop snd_nxt
+  step = 6;
+  pcb->state = TCP_SYN_RCVD;
+  pcb->snd_una = 3000;
+  pcb->snd_nxt = 3001;
+  release(&pcb->lock);
+  inject_test_tcp(rip, rport, lip, lport, 1000, 3999, TCP_FLAG_ACK, 8192, 0x50, 0, 0);
+  if (pcb->state != TCP_SYN_RCVD)
+    goto fail;
+
+  // 7. Simultaneous Close: FIN_WAIT_1 nhan FIN truoc khi FIN cua minh duoc ACK -> CLOSING -> TIME_WAIT
+  step = 7;
+  acquire(&pcb->lock);
+  pcb->state = TCP_FIN_WAIT_1;
+  pcb->snd_una = 4000;
+  pcb->snd_nxt = 4001;
+  pcb->rcv_nxt = 1000;
+  release(&pcb->lock);
+  inject_test_tcp(rip, rport, lip, lport, 1000, 4000, TCP_FLAG_FIN | TCP_FLAG_ACK, 8192, 0x50, 0, 0);
+  if (pcb->state != TCP_CLOSING || pcb->rcv_nxt != 1001)
+    goto fail;
+  step = 72;
+  inject_test_tcp(rip, rport, lip, lport, 1001, 4001, TCP_FLAG_ACK, 8192, 0x50, 0, 0);
+  if (pcb->state != TCP_TIME_WAIT)
+    goto fail;
+
+  // 8. TIME_WAIT nhan lai FIN (do ACK cuoi bi mat): phai giu nguyen state, reset timer 2 MSL
+  step = 8;
+  acquire(&pcb->lock);
+  pcb->rto_deadline = ticks + 5;
+  release(&pcb->lock);
+  inject_test_tcp(rip, rport, lip, lport, 1000, 4001, TCP_FLAG_FIN | TCP_FLAG_ACK, 8192, 0x50, 0, 0);
+  if (pcb->state != TCP_TIME_WAIT || pcb->rcv_nxt != 1001 ||
+      (int32)(pcb->rto_deadline - (ticks + 150)) < 0)
+    goto fail;
+
+  // 9. LAST_ACK tu choi ACK rac (> snd_nxt), chi dong khi nhan ACK dung (= snd_nxt)
+  step = 9;
+  acquire(&pcb->lock);
+  pcb->state = TCP_LAST_ACK;
+  pcb->snd_una = 5000;
+  pcb->snd_nxt = 5001;
+  release(&pcb->lock);
+  inject_test_tcp(rip, rport, lip, lport, 1001, 5050, TCP_FLAG_ACK, 8192, 0x50, 0, 0);
+  if (pcb->state != TCP_LAST_ACK)
+    goto fail;
+  step = 92;
+  inject_test_tcp(rip, rport, lip, lport, 1001, 5001, TCP_FLAG_ACK, 8192, 0x50, 0, 0);
+  // Sau ACK dung, pcb tu dong chuyen TCP_CLOSED va duoc tcp_pcb_free thu hoi
+  arp_flush();
+
+  struct net_audit a;
+  net_audit_collect(&a, NETAUDIT_FLUSH_ARP);
+  if (a.tcp_zombie != 0 || a.leaked != 0) {
+    printk("tcp_edge_selftest: FAIL audit zombie=%d leaked=%d state=%d\n",
+           a.tcp_zombie, a.leaked, pcb->state);
+    return -1;
+  }
+
+  printk("tcp_edge_selftest: PASS (garbage/ooO/SYN_RCVD/CLOSING/TIME_WAIT/LAST_ACK)\n");
+  return 0;
+
+fail:
+  printk("tcp_edge_selftest: FAIL at step=%d state=%d una=%u nxt=%u rcv=%u\n",
+         step, pcb->state, pcb->snd_una, pcb->snd_nxt, pcb->rcv_nxt);
+  tcp_pcb_free(pcb);
+  arp_flush();
+  return -1;
 }

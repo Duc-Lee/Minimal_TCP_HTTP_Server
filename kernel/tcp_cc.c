@@ -25,7 +25,7 @@ tcp_cc_trace(struct tcp_pcb *pcb, const char *ev)
 int
 tcp_set_cc_algo(int algo)
 {
-  if (algo != CC_RENO && algo != CC_BBR)
+  if (algo != CC_RENO && algo != CC_BBR && algo != CC_BASIC)
     return -1;
   int old = tcp_cc_algo;
   tcp_cc_algo = algo;
@@ -182,8 +182,11 @@ bbr_on_ack(struct tcp_pcb *pcb, uint32 ack)
     min_rtt = pcb->latest_rtt_us ? pcb->latest_rtt_us : 1000;
 
   uint64 bdp = ((uint64)pcb->bbr_max_bw * (uint64)min_rtt) / 1000000ULL;
-  if (bdp < 4 * TCP_MSS)
-    bdp = 4 * TCP_MSS;
+  // Giu nguong san BDP toi thieu 20 MSS de tranh collapse cwnd tren QEMU SLIRP
+  // (min_rtt loopback sub-ms khien BDP tho tut xuong 4 MSS va khoa PROBE_BW o 16 MSS),
+  // giu cua so PROBE_BW dao dong an toan trong 19..29 MSS (< TX_RING_SIZE=32).
+  if (bdp < 20 * TCP_MSS)
+    bdp = 20 * TCP_MSS;
   pcb->bbr_bdp = (uint32)bdp;
 
   // 4. Theo doi cac vong round-trip
@@ -250,12 +253,13 @@ bbr_on_ack(struct tcp_pcb *pcb, uint32 ack)
       pcb->bbr_cycle_stamp = now;
     }
 
-    // Dieu chinh cwnd theo gain cua pha chu ky hien tai
+    // Dieu chinh cwnd theo gain cua pha chu ky hien tai; giu vung cua so khi dang recovery
     uint32 gain = bbr_pacing_gains[pcb->bbr_cycle_idx];
     uint32 target = (pcb->bbr_bdp * gain) / 8 + 4 * TCP_MSS;
     if (pcb->cwnd < target) {
       pcb->cwnd += TCP_MSS;
-    } else if (pcb->cwnd > target && pcb->cwnd > 16 * TCP_MSS) {
+    } else if ((int32)(ack - pcb->recover) >= 0 &&
+               pcb->cwnd > target && pcb->cwnd > 16 * TCP_MSS) {
       pcb->cwnd -= TCP_MSS / 2;
     }
     break;
@@ -293,6 +297,12 @@ bbr_on_ack(struct tcp_pcb *pcb, uint32 ack)
 void
 tcp_cc_on_ack(struct tcp_pcb *pcb, uint32 ack)
 {
+  if (pcb->cc_algo == CC_BASIC) {
+    // TCP co ban (Baseline truoc tuan 3): cua so co dinh 16 MSS, khong AIMD/BBR
+    pcb->dupack_cnt = 0;
+    pcb->cwnd = 16 * TCP_MSS;
+    return;
+  }
   if (pcb->cc_algo == CC_BBR)
     bbr_on_ack(pcb, ack);
   else
@@ -304,6 +314,11 @@ void
 tcp_cc_on_dup_ack(struct tcp_pcb *pcb, uint32 ack)
 {
   pcb->dupack_cnt++;
+
+  if (pcb->cc_algo == CC_BASIC) {
+    // TCP co ban: khong ho tro Fast Retransmit / Fast Recovery, doi RTO timeout
+    return;
+  }
 
   if (pcb->cc_algo == CC_BBR) {
     // Google BBR: Mat goi KHONG phai la dau hieu tac nghen mang!
@@ -339,14 +354,10 @@ tcp_cc_on_dup_ack(struct tcp_pcb *pcb, uint32 ack)
     tcp_cc_trace(pcb, "FAST_RETRANSMIT");
     wakeup(pcb);
   } else if (pcb->dupack_cnt > 3) {
-    // Fast Recovery (Window Inflation):
+    // Fast Recovery (RFC 5681 Window Inflation):
     pcb->cwnd += TCP_MSS;
     if (pcb->cwnd > MAX_CWND)
       pcb->cwnd = MAX_CWND;
-    // Neu ban tin Fast Retransmit bi bo gia lap mat goi drop o muc loss cao (20-50%),
-    // moi 3 DupACK tiep theo truyen lai segment dau hang doi de khong phai cho RTO 200ms
-    if ((pcb->dupack_cnt % 3) == 0)
-      tcp_fast_retransmit(pcb);
     wakeup(pcb);
   }
 }
@@ -355,15 +366,25 @@ tcp_cc_on_dup_ack(struct tcp_pcb *pcb, uint32 ack)
 void
 tcp_cc_on_timeout(struct tcp_pcb *pcb)
 {
+  if (pcb->cc_algo == CC_BASIC) {
+    pcb->cwnd = 16 * TCP_MSS;
+    pcb->dupack_cnt = 0;
+    tcp_cc_trace(pcb, "BASIC_TIMEOUT");
+    return;
+  }
+
   if (pcb->cc_algo == CC_BBR) {
     // Google BBR khi timeout: truyen lai goi bi thieu o dau hang doi,
-    // tam thoi dua cwnd ve 4 MSS cho den khi co ACK dau tien tro lai,
-    // giu nguyen bo loc bbr_max_bw chu khong chia doi nhu Reno.
+    // giu nguyen bo loc bbr_max_bw va reset bbr_bw_plateau_cnt de STARTUP
+    // do lai dung 3 round; chi ha sau ve 4 MSS khi mat goi lien tiep (backoff > 1).
     tcp_fast_retransmit(pcb);
-    pcb->cwnd = 4 * TCP_MSS;
+    pcb->cwnd = (pcb->backoff > 1) ? (4 * TCP_MSS) : (12 * TCP_MSS);
     pcb->dupack_cnt = 0;
     pcb->recover = pcb->snd_nxt;
     pcb->bbr_state = BBR_STARTUP;
+    pcb->bbr_bw_plateau_cnt = 0;
+    pcb->bbr_prev_max_bw = 0;
+    pcb->bbr_round_delivered = pcb->delivered + pcb->bbr_bdp;
     tcp_cc_trace(pcb, "BBR_TIMEOUT");
     return;
   }

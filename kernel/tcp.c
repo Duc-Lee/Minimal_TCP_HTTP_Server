@@ -45,6 +45,59 @@ tcp_init(void)
   tcp_timer_selftest();
 }
 
+// go pcb khoi hash_table va listen_list (phai giu tcp_mgr.lock)
+static void
+tcp_pcb_detach_locked(struct tcp_pcb *pcb)
+{
+  uint32 h = tcp_hash_fn(pcb->local_ip, pcb->local_port, pcb->remote_ip,
+                         pcb->remote_port);
+  struct tcp_pcb **curr = &tcp_mgr.hash_table[h];
+  while (*curr) {
+    if (*curr == pcb) {
+      *curr = pcb->next;
+      break;
+    }
+    curr = &(*curr)->next;
+  }
+
+  curr = &tcp_mgr.listen_list;
+  while (*curr) {
+    if (*curr == pcb) {
+      *curr = pcb->next;
+      break;
+    }
+    curr = &(*curr)->next;
+  }
+}
+
+// tai su dung PCB TIME_WAIT lau nhat khi free_list can kiet duoi tai ket noi don dap
+static void
+tcp_pcb_recycle_timewait_locked(void)
+{
+  struct tcp_pcb *tw = 0;
+  for (int i = 0; i < TCP_PCB_POOL_SIZE; i++) {
+    struct tcp_pcb *cand = &tcp_mgr.pcbs[i];
+    acquire(&cand->lock);
+    if (cand->state == TCP_TIME_WAIT && cand->sock == 0 &&
+        cand->retransmit_q == 0 && cand->ooo_queue == 0) {
+      if (!tw || (int32)(cand->rto_deadline - tw->rto_deadline) < 0)
+        tw = cand;
+    }
+    release(&cand->lock);
+  }
+  if (tw) {
+    acquire(&tw->lock);
+    if (tw->state == TCP_TIME_WAIT && tw->sock == 0 &&
+        tw->retransmit_q == 0 && tw->ooo_queue == 0) {
+      tcp_pcb_detach_locked(tw);
+      tw->state = TCP_CLOSED;
+      tw->next = tcp_mgr.free_list;
+      tcp_mgr.free_list = tw;
+    }
+    release(&tw->lock);
+  }
+}
+
 // cap phat pcb moi
 struct tcp_pcb *
 tcp_pcb_alloc(void)
@@ -52,6 +105,8 @@ tcp_pcb_alloc(void)
   struct tcp_pcb *pcb = 0;
 
   acquire(&tcp_mgr.lock);
+  if (!tcp_mgr.free_list)
+    tcp_pcb_recycle_timewait_locked();
   if (tcp_mgr.free_list) {
     pcb = tcp_mgr.free_list;
     tcp_mgr.free_list = pcb->next;
@@ -158,27 +213,15 @@ tcp_pcb_free(struct tcp_pcb *pcb)
 
   acquire(&tcp_mgr.lock);
 
-  // xoa khoi hash table
-  uint32 h = tcp_hash_fn(pcb->local_ip, pcb->local_port, pcb->remote_ip,
-                         pcb->remote_port);
-  struct tcp_pcb **curr = &tcp_mgr.hash_table[h];
-  while (*curr) {
-    if (*curr == pcb) {
-      *curr = pcb->next;
-      break;
+  // chong double-free neu pcb da nam san trong free_list
+  for (struct tcp_pcb *f = tcp_mgr.free_list; f; f = f->next) {
+    if (f == pcb) {
+      release(&tcp_mgr.lock);
+      return;
     }
-    curr = &(*curr)->next;
   }
 
-  // xoa khoi listen list
-  curr = &tcp_mgr.listen_list;
-  while (*curr) {
-    if (*curr == pcb) {
-      *curr = pcb->next;
-      break;
-    }
-    curr = &(*curr)->next;
-  }
+  tcp_pcb_detach_locked(pcb);
 
   pcb->state = TCP_CLOSED;
   pcb->next = tcp_mgr.free_list;
@@ -230,14 +273,25 @@ tcp_timer_process(void)
       continue;
     }
 
-    // het han time_wait
+    // het han time_wait (2 MSL): thu hoi an toan duoi tcp_mgr.lock -> pcb->lock
     if (pcb->state == TCP_TIME_WAIT) {
-      if (pcb->rto_deadline > 0 && ticks >= pcb->rto_deadline) {
-        release(&pcb->lock);
-        tcp_pcb_free(pcb);
-        continue;
-      }
+      int expired = (pcb->rto_deadline > 0 &&
+                     (int32)(ticks - pcb->rto_deadline) >= 0);
       release(&pcb->lock);
+      if (expired) {
+        acquire(&tcp_mgr.lock);
+        acquire(&pcb->lock);
+        if (pcb->state == TCP_TIME_WAIT && pcb->sock == 0 &&
+            pcb->rto_deadline > 0 &&
+            (int32)(ticks - pcb->rto_deadline) >= 0) {
+          tcp_pcb_detach_locked(pcb);
+          pcb->state = TCP_CLOSED;
+          pcb->next = tcp_mgr.free_list;
+          tcp_mgr.free_list = pcb;
+        }
+        release(&pcb->lock);
+        release(&tcp_mgr.lock);
+      }
       continue;
     }
 
@@ -466,8 +520,10 @@ tcp_dump_stats(void)
            (pcb->remote_ip >> 24) & 0xff, (pcb->remote_ip >> 16) & 0xff,
            (pcb->remote_ip >> 8) & 0xff, pcb->remote_ip & 0xff, pcb->remote_port,
            pcb->cwnd, pcb->ssthresh, pcb->srtt >> 3, pcb->rto);
+    const char *cc_str = (pcb->cc_algo == CC_BBR) ? "BBR" :
+                         (pcb->cc_algo == CC_BASIC) ? "Basic" : "Reno";
     printk("tcp[%d]:   cc=%s(%d) bbr_st=%d bdp=%d max_bw=%d rtt_us=%d min_rtt_us=%d delivered=%lu rate=%dB/s samples=%d\n",
-           i, pcb->cc_algo == CC_BBR ? "BBR" : "Reno", pcb->cc_algo,
+           i, cc_str, pcb->cc_algo,
            pcb->bbr_state, pcb->bbr_bdp, pcb->bbr_max_bw,
            pcb->latest_rtt_us, pcb->min_rtt_us, pcb->delivered,
            pcb->delivery_rate, pcb->rtt_samples);

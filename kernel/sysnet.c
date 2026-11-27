@@ -178,8 +178,12 @@ sys_netstat(void)
   argaddr(0, &uaddr);
   argint(1, &max_entries);
 
-  // neu truyen buffer NULL (uaddr == 0) thi dump thong ke ra console kernel
+  // neu truyen buffer NULL (uaddr == 0):
+  //   max_entries == -1 -> chay tu kiem thu tinh huong bien FSM & goi rac
+  //   max_entries == 0  -> dump thong ke ra console kernel
   if (uaddr == 0) {
+    if (max_entries == -1)
+      return tcp_edge_selftest();
     tcp_dump_stats();
     return 0;
   }
