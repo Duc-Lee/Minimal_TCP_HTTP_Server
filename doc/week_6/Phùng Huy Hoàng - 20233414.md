@@ -187,4 +187,3 @@ Chạy đầy đủ cả 7 suite qua `python3 tests/run_tests.py` và bài kiể
 | `tests/tcp/test_edge_cases.py` | Tạo mới | Kiểm thử tự động gói rác, `RST` port đóng, half-close, client abort (`SO_LINGER`), bão 40 kết nối `TIME_WAIT` và thu hồi sau `2 MSL` |
 | `tests/tcp/test_week6_benchmark.py` | Tạo mới | Benchmark 3 thế hệ `Basic / Reno / BBR` qua các mức loss `0% / 5% / 10% / 20%`, xuất 3 biểu đồ vào `doc/week_6/` và tự bật cửa sổ xem ảnh riêng |
 | `doc/week_6/*.png` | Tạo mới | 3 ảnh biểu đồ kết quả (`bbr_vs_reno_chart.png`, `cwnd_reno_loss10.png`, `cwnd_bbr_loss10.png`) |
-| `doc/week_6/Phùng Huy Hoàng - 20233414.md` | Cập nhật | Báo cáo tiến trình hoàn chỉnh Tuần 6 của TV2 |
